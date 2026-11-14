@@ -129,7 +129,7 @@ def execute_sleep(
 
     def _interrupt_handler(_signum: int, _frame: Any) -> None:
         if tty:
-            Console(file=stream, force_terminal=True).print(
+            Console(file=stream, force_terminal=True, highlight=False).print(
                 "\n[yellow]Sleep cancelled by user. Exiting safely...[/yellow]"
             )
         else:
@@ -157,7 +157,7 @@ def execute_sleep(
 
     try:
         if tty:
-            console = Console(file=stream, force_terminal=True)
+            console = Console(file=stream, force_terminal=True, highlight=False)
             with Progress(
                 TextColumn("[cyan]Zero-token sleep[/cyan]"),
                 TextColumn("[bold]{task.description}[/bold]"),

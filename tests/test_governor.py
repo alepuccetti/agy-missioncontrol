@@ -151,7 +151,9 @@ def test_execute_sleep_non_tty_heartbeats_zero_ansi() -> None:
     assert len(sleeps) == 125
 
 
-def test_execute_sleep_tty_mode_completes() -> None:
+def test_execute_sleep_tty_mode_completes(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.setenv("FORCE_COLOR", "1")
     stream = io.StringIO()
     sleeps: list[float] = []
     completed = execute_sleep(
