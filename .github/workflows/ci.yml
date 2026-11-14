@@ -1,0 +1,56 @@
+name: CI Pipeline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Lint, Test & Validate (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-24.04  # Pinned Ubuntu 24.04 LTS (Noble Numbat)
+          - macos-15      # Pinned macOS 15 (Apple Silicon ARM64)
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+
+      - name: Set up uv Toolchain
+        uses: astral-sh/setup-uv@v10
+        with:
+          enable-cache: true
+          python-version: "3.15"
+
+      - name: Install pnpm Package Manager
+        uses: pnpm/action-setup@v6
+        with:
+          version: 12
+
+      - name: Set up Node.js LTS
+        uses: actions/setup-node@v7
+        with:
+          node-version: 26  # Node.js 26 Active LTS
+
+      - name: Set up Go-Task Runner
+        uses: arduino/setup-task@v3
+        with:
+          version: 3.x
+
+      - name: Install Dependencies
+        run: |
+          task install
+          task ui:install
+
+      - name: Execute Quality Checks (Lint, Format & Tests)
+        run: task check
+
+      - name: Validate Binary Compilation
+        run: task build:binary

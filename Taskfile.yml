@@ -1,0 +1,99 @@
+version: '3'
+
+env:
+  UV_PROJECT_ENVIRONMENT: "{{.HOME}}/.virtualenvs/agymissioncontrol"
+
+vars:
+  PACKAGE_NAME: agymissioncontrol
+  SRC_DIR: src/agymissioncontrol
+  UI_DIR: src/agymissioncontrol/ui/frontend
+  PLUGIN_DIR: "{{.USER_WORKING_DIR}}/plugin"
+  ANTIGRAVITY_PLUGIN_DIR: "{{.HOME}}/.gemini/config/plugins/agymissioncontrol"
+
+tasks:
+  default:
+    desc: List available tasks
+    cmds:
+      - task --list
+
+  install:
+    desc: Install virtual environment and development dependencies
+    cmds:
+      - uv sync --dev
+
+  test:
+    desc: Run pytest test suite
+    cmds:
+      - uv run pytest tests/ -v
+
+  lint:
+    desc: Run Ruff linter
+    cmds:
+      - uv run ruff check src/ tests/ .agents/scripts/ plugin/scripts/
+
+  format:
+    desc: Format codebase with Ruff
+    cmds:
+      - uv run ruff format src/ tests/ .agents/scripts/ plugin/scripts/
+
+  format:check:
+    desc: Check formatting without modifying files
+    cmds:
+      - uv run ruff format --check src/ tests/ .agents/scripts/ plugin/scripts/
+
+  check:
+    desc: Run all quality checks (format check, lint, and tests)
+    cmds:
+      - task: format:check
+      - task: lint
+      - task: test
+
+  dev:link:
+    desc: Install CLI into PATH (editable) and link plugin into Antigravity
+    deps: [install]
+    cmds:
+      - uv tool install --editable . --force
+      - mkdir -p "{{.HOME}}/.gemini/config/plugins"
+      - ln -sfn "{{.PLUGIN_DIR}}" "{{.ANTIGRAVITY_PLUGIN_DIR}}"
+      - echo "Plugin linked and agymissioncontrol installed in PATH with live reload!"
+
+  plugin:unlink:
+    desc: Remove Antigravity plugin symlink
+    cmds:
+      - rm -f "{{.ANTIGRAVITY_PLUGIN_DIR}}"
+      - echo "Plugin symlink removed."
+
+  ui:install:
+    desc: Install frontend dependencies (pnpm)
+    cmds:
+      - '[ -f "{{.UI_DIR}}/package.json" ] && pnpm --prefix {{.UI_DIR}} install || echo "Frontend package.json not yet scaffolded; skipping pnpm install."'
+
+  ui:build:
+    desc: Compile TypeScript + Alpine.js dashboard into static assets
+    cmds:
+      - mkdir -p src/agymissioncontrol/ui/static
+      - '[ -f "{{.UI_DIR}}/package.json" ] && pnpm --prefix {{.UI_DIR}} build || echo "Using static asset placeholder."'
+
+  ui:dev:
+    desc: Start Vite dev server for frontend development
+    cmds:
+      - pnpm --prefix {{.UI_DIR}} dev
+
+  build:binary:
+    desc: Compile standalone single-file binary with PyInstaller (bundles static UI)
+    deps: [install, ui:build]
+    cmds:
+      - uv run pyinstaller --onefile --name agymissioncontrol --clean --specpath build --add-data "{{.TASKFILE_DIR}}/src/agymissioncontrol/ui/static:agymissioncontrol/ui/static" src/agymissioncontrol/cli.py
+      - echo "Standalone binary compiled at dist/agymissioncontrol"
+
+  ci:
+    desc: Run full CI validation pipeline
+    cmds:
+      - task: check
+      - task: build:binary
+
+  clean:
+    desc: Clean build, dist, and cache artifacts
+    cmds:
+      - rm -rf dist/ build/ *.egg-info/ .pytest_cache/ .ruff_cache/ .coverage htmlcov/
+      - find . -type d -name "__pycache__" -exec rm -rf {} +

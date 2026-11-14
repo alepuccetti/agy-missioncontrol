@@ -2,7 +2,7 @@
 
 - **Task ID:** `E00-T04`
 - **Parent Epic:** [Epic E00: Workspace Permissions, Command Guards, Python Tooling & Repository Setup](./EPIC.md)
-- **Status:** `[ ] TODO`
+- **Status:** `[x] DONE`
 - **Execution Mode:** ⚡ Direct
 - **Primary Agent:** `infra-specialist` (or Primary Orchestrator)
 - **Dependencies:** `E00-T02`
@@ -19,8 +19,8 @@
 
 ## 2. Testable Acceptance Criteria
 
-- [ ] **AC-1:** Root `Taskfile.yml` is created using Taskfile schema version 3.
-- [ ] **AC-2:** Defines core task targets:
+- [x] **AC-1:** Root `Taskfile.yml` is created using Taskfile schema version 3.
+- [x] **AC-2:** Defines core task targets:
   - `task install`: Installs virtual environment and dependencies via `uv sync --dev`.
   - `task test`: Runs pytest suite (`uv run pytest tests/ -v`).
   - `task lint`: Runs Ruff linter (`uv run ruff check src/ tests/`).
@@ -34,9 +34,9 @@
   - `task build:binary`: Automatically runs `ui:build`, then compiles standalone single-file binary with PyInstaller into `dist/agymissioncontrol`, bundling static assets with cross-platform path separators.
   - `task ci`: Executes full CI pipeline (`check` + dry-run binary build).
   - `task clean`: Cleans build, dist, and cache artifacts.
-- [ ] **AC-3:** Running `task --list` prints formatted task descriptions with clean alignment.
-- [ ] **AC-4:** Running `task check` on a clean workspace executes without errors and exits code `0`.
-- [ ] **AC-5:** Continuous Integration Workflow (`.github/workflows/ci.yml`) triggers on pull requests and pushes to `main`. It pins runners strictly to supported LTS/current OS versions (`ubuntu-24.04`, `macos-15`) and latest pinned actions (`actions/checkout@v7`, `astral-sh/setup-uv@v10` with `python-version: "3.15"`, `pnpm/action-setup@v6` with `version: 12`, `actions/setup-node@v7` with Node 26 LTS, `arduino/setup-task@v3`), rejecting unpinned floating `-latest` runner tags.
+- [x] **AC-3:** Running `task --list` prints formatted task descriptions with clean alignment.
+- [x] **AC-4:** Running `task check` on a clean workspace executes without errors and exits code `0`.
+- [x] **AC-5:** Continuous Integration Workflow (`.github/workflows/ci.yml`) triggers on pull requests and pushes to `main`. It pins runners strictly to supported LTS/current OS versions (`ubuntu-24.04`, `macos-15`) and latest pinned actions (`actions/checkout@v7`, `astral-sh/setup-uv@v10` with `python-version: "3.15"`, `pnpm/action-setup@v6` with `version: 12`, `actions/setup-node@v7` with Node 26 LTS, `arduino/setup-task@v3`), rejecting unpinned floating `-latest` runner tags.
 
 ---
 
@@ -218,7 +218,7 @@ jobs:
 
 ## 5. Verification & Definition of Done
 
-- [ ] Run `task --list` and confirm all tasks render with descriptions.
-- [ ] Run `task check` and confirm exit code 0.
-- [ ] Run `task dev:link` and confirm `which agymissioncontrol` resolves and `~/.gemini/config/plugins/agymissioncontrol` exists.
-- [ ] Verify `.github/workflows/ci.yml` syntax parses cleanly with no floating `-latest` OS tags (`ubuntu-24.04`, `macos-15`) and all actions are pinned to latest stable major versions (`checkout@v7`, `setup-uv@v10`, `action-setup@v6`, `setup-node@v7`, `setup-task@v3`).
+- [x] Run `task --list` and confirm all tasks render with descriptions.
+- [x] Run `task check` and confirm exit code 0.
+- [x] Run `task dev:link` and confirm `which agymissioncontrol` resolves and `~/.gemini/config/plugins/agymissioncontrol` exists.
+- [x] Verify `.github/workflows/ci.yml` syntax parses cleanly with no floating `-latest` OS tags (`ubuntu-24.04`, `macos-15`) and all actions are pinned to latest stable major versions (`checkout@v7`, `setup-uv@v10`, `action-setup@v6`, `setup-node@v7`, `setup-task@v3`).
