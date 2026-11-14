@@ -57,6 +57,10 @@ agy-missioncontrol/
 5. **External Virtualenv & Mandatory Verification Gate (`task check`):**
    - Virtual environments must live **outside the repository** at `~/.virtualenvs/agymissioncontrol` (via `UV_PROJECT_ENVIRONMENT`), keeping the repo free of `.venv/` directories.
    - Every task must pass `ruff format --check`, `ruff check`, and `pytest` on Python `3.15` (`.python-version` = `3.15`) before marking `[x] DONE` in `roadmap/`.
+6. **Mandatory Task & Epic GitHub Issue Body Synchronization:**
+   - Updating only the local `roadmap/` markdown or the parent Epic issue is insufficient. For **every task (`E0X-T0Y`) AND parent epic (`E0X`)**, once `task check` passes and the signed commit is created:
+     1. Update local `roadmap/E0X/T0Y-*.md`, `roadmap/E0X/EPIC.md`, and `roadmap/ROADMAP.md` (`- **Status:** \`[x] DONE\``, `- **Implementing Commits (\`main\`):**`, and `[x]` on all AC, Task table, and Verification / DoD checkboxes).
+     2. Propagate those completed statuses, checked Acceptance Criteria / Verification / DoD checkboxes, and implementing commit links to the **GitHub Task Issue** (`gh issue edit <task-issue> --body-file ...`) and **GitHub Epic Issue** (`gh issue edit <epic-issue> --body-file ...`) **before** calling `gh issue close`, preserving each issue's top callout header (`> **Parent Epic:**`, `> **Blocked by:**`, `### Tracked Tasks`) and rewriting relative `../../README.md` links to GitHub `blob/main/README.md`.
 
 ---
 
@@ -66,8 +70,8 @@ Instead of rigid subagent ceremonies, each task carries a lightweight execution 
 
 | Signal | Meaning for the Orchestrator |
 | :--- | :--- |
-| **`⚡ Direct`** | **Implement + unit test directly** in one pass, run `task check`, and mark `[x] DONE`. No subagent delegation needed. |
-| **`🧠 Deep Verify`** | **High-risk core logic** (security guard, SQLite WAL/concurrency, `agy /usage` gating, AST/DAG parsing, subprocess isolation, supervisor loop). Write thorough edge-case/signal/concurrency tests and run a final diff/spec audit (self-review or read-only `code-reviewer`) before marking `[x] DONE`. |
+| **`⚡ Direct`** | **Implement + unit test directly** in one pass, run `task check`, update local `roadmap/` + GitHub issue body (`gh issue edit`), then close issue. No subagent delegation needed. |
+| **`🧠 Deep Verify`** | **High-risk core logic** (security guard, SQLite WAL/concurrency, `agy /usage` gating, AST/DAG parsing, subprocess isolation, supervisor loop). Write thorough edge-case/signal/concurrency tests and run a final diff/spec audit (self-review or read-only `code-reviewer`) before marking `[x] DONE` locally and syncing the GitHub issue body (`gh issue edit`). |
 | **`🐝 Parallel`** | **Decoupled modules (`E04-T02`–`T04`)** that can run as parallel workers once `E04-T01` locks `registry.db`, target/signal helpers, and `SessionState` contracts. Keep workers scoped to non-overlapping paths (`cli.py` vs `ui/frontend/` vs `ui/server.py`) and shut them down immediately on completion. |
 
 ---
@@ -115,6 +119,8 @@ Implement Epic E0X in roadmap/E0X/EPIC.md sequentially, following AGENT_ARCHITEC
 - For `⚡ Direct` tasks: implement and test directly in one pass.
 - For `🧠 Deep Verify` tasks: add thorough edge-case/signal/concurrency tests and audit your diff against the spec.
 - For `🐝 Parallel` tasks (E04-T02..T04): run parallel workers only after E04-T01 locks `registry.db` and `SessionState`.
-- Run `task check` (or `uv run ruff check` + `uv run pytest`) after each task, then mark it `[x] DONE` in both the task file and `EPIC.md`.
-- Pause and ask before external auth or side effects (e.g., `gh auth login`, `gh repo create`, or GPG-signed commits).
+- Run `task check` (or `uv run ruff check` + `uv run pytest`) after each task, commit GPG-signed (`fix: <issue-url>` in body), then:
+  1. Mark `[x] DONE`, record `Implementing Commits (\`main\`)`, and check `[x]` on all AC / Verification / DoD checkboxes in local `roadmap/E0X/T0Y-*.md`, `roadmap/E0X/EPIC.md`, and `roadmap/ROADMAP.md`.
+  2. Sync the updated body (preserving top GitHub callout headers) to the GitHub Task Issue via `gh issue edit <task-issue> --body-file ...` **before** calling `gh issue close`; once all tasks in `E0X` finish, sync the Epic body via `gh issue edit <epic-issue> --body-file ...` **before** closing the Epic issue.
+- Keep the human global identity as Committer/GPG signer and `Alessandro Puccetti Agent [bot]` as Author on agent commits.
 ```
