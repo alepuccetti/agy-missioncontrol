@@ -1,0 +1,4 @@
+{
+  "name": "agymissioncontrol",
+  "description": "Autonomous task orchestrator, quota governor, and issue-to-spec compiler for Google Antigravity"
+}

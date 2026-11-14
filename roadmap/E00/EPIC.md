@@ -38,7 +38,7 @@ Establish the initial Git repository baseline, Python packaging foundation (`pyp
 
 - [x] **AC-1 (Git Workspace Baseline):** Git is initialized on default branch `main`, with a root `.gitignore` protecting build artifacts, virtual environments, and local test run outputs.
 - [x] **AC-2 (Modern Python Packaging with `uv`):** `pyproject.toml` and `.python-version` configure `hatchling` backend, Python `>=3.15`, core dependencies (`typer>=0.29.0`, `pydantic>=2.14.0`, `pyyaml>=6.0.3`, `rich>=15.0.0`), dev tools (`pytest>=9.2.0`, `pytest-mock>=3.17.0`, `ruff>=0.17.0`, `pyinstaller>=6.22.0`), and entrypoint `agymissioncontrol`.
-- [ ] **AC-3 (Command Guard & Antigravity Hook):** `.agents/hooks.json`, `plugin/hooks.json`, `plugin/plugin.json`, and `.agents/scripts/command_guard.py` are active, providing deterministic pre-execution validation for `run_command` invocations across macOS and Linux (including Remote Agent cloud environments).
+- [x] **AC-3 (Command Guard & Antigravity Hook):** `.agents/hooks.json`, `plugin/hooks.json`, `plugin/plugin.json`, and `.agents/scripts/command_guard.py` are active, providing deterministic pre-execution validation for `run_command` invocations across macOS and Linux (including Remote Agent cloud environments).
 - [ ] **AC-4 (Go-Task Automation & Pinned LTS CI):** `Taskfile.yml` provides operational targets `dev:link` (editable tool install + plugin symlink), `build:binary` (standalone executable), and `ci`. GitHub Actions `.github/workflows/ci.yml` matrix pipeline runs across pinned supported runners (`ubuntu-24.04`, `macos-15`) with pinned action versions, rejecting floating `-latest` aliases.
 - [ ] **AC-5 (GitHub CLI & Remote Readiness):** `gh auth status` verifies active credentials, and remote repository wiring is prepared for issue tracking and milestone synchronization.
 
@@ -50,7 +50,7 @@ Establish the initial Git repository baseline, Python packaging foundation (`pyp
 | :--- | :--- | :---: | :---: |
 | **[E00-T01](./T01-git-init-and-ignore.md)** | Git Repository Initialization, MIT License, Branch Protection Baseline & `.gitignore` | ⚡ Direct | `[x] DONE` |
 | **[E00-T02](./T02-python-packaging-and-uv-setup.md)** | Modern Python Packaging (`pyproject.toml`), Dependency Pinning & `uv` Toolchain | ⚡ Direct | `[x] DONE` |
-| **[E00-T03](./T03-antigravity-hooks-and-command-guard.md)** | Antigravity Pre-Tool Hooks (`.agents/hooks.json`), `plugin.json` & `command_guard.py` | 🧠 Deep Verify | `[ ] TODO` |
+| **[E00-T03](./T03-antigravity-hooks-and-command-guard.md)** | Antigravity Pre-Tool Hooks (`.agents/hooks.json`), `plugin.json` & `command_guard.py` | 🧠 Deep Verify | `[x] DONE` |
 | **[E00-T04](./T04-dev-automation-taskfile.md)** | Developer Automation (`Taskfile.yml`) & Pinned LTS GitHub Actions CI Workflow | ⚡ Direct | `[ ] TODO` |
 | **[E00-T05](./T05-github-remote-link-and-labels.md)** | GitHub CLI Integration, Remote Origin Setup & Standard Issue Label Taxonomy | ⚡ Direct | `[ ] TODO` |
 
@@ -61,6 +61,6 @@ Establish the initial Git repository baseline, Python packaging foundation (`pyp
 - [x] Git repository initialized on `main` with initial commit containing project layout.
 - [x] `pyproject.toml` passes syntax and dependency validation; `uv run ruff check` runs without errors.
 - [ ] `task dev:link` executes cleanly, installing `agymissioncontrol` into PATH and symlinking `plugin/`.
-- [ ] Command guard unit tests pass (`uv run pytest tests/test_command_guard.py`).
+- [x] Command guard unit tests pass (`uv run pytest tests/test_command_guard.py`).
 - [ ] `task check` executes formatting checks, linting, and unit tests cleanly.
 - [ ] GitHub remote is linked or authenticated via `gh`.

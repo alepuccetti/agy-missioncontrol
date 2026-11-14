@@ -2,7 +2,7 @@
 
 - **Task ID:** `E00-T03`
 - **Parent Epic:** [Epic E00: Workspace Permissions, Command Guards, Python Tooling & Repository Setup](./EPIC.md)
-- **Status:** `[ ] TODO`
+- **Status:** `[x] DONE`
 - **Execution Mode:** 🧠 Deep Verify
 - **Primary Agent:** `infra-specialist` (or Primary Orchestrator)
 - **Dependencies:** `E00-T02`
@@ -19,15 +19,15 @@
 
 ## 2. Testable Acceptance Criteria
 
-- [ ] **AC-1:** `.agents/hooks.json` and `plugin/hooks.json` configure `PreToolUse` hooks matching Antigravity's schema (`matcher: "run_command"`), intercepting execution via `command_guard.py`.
-- [ ] **AC-2:** `plugin/plugin.json` is created at the plugin root with name `agymissioncontrol`, allowing Antigravity to discover and activate the plugin when symlinked or installed.
-- [ ] **AC-3:** `.agents/scripts/command_guard.py` parses standard Antigravity stdin JSON (`{"toolCall": {"name": "run_command", "args": {"CommandLine": "..."}}, ...}`) with fallback to flat `{"CommandLine": "..."}` for test ergonomics.
-- [ ] **AC-4:** Evaluates commands into Antigravity decision outcomes emitted as JSON on stdout:
+- [x] **AC-1:** `.agents/hooks.json` and `plugin/hooks.json` configure `PreToolUse` hooks matching Antigravity's schema (`matcher: "run_command"`), intercepting execution via `command_guard.py`.
+- [x] **AC-2:** `plugin/plugin.json` is created at the plugin root with name `agymissioncontrol`, allowing Antigravity to discover and activate the plugin when symlinked or installed.
+- [x] **AC-3:** `.agents/scripts/command_guard.py` parses standard Antigravity stdin JSON (`{"toolCall": {"name": "run_command", "args": {"CommandLine": "..."}}, ...}`) with fallback to flat `{"CommandLine": "..."}` for test ergonomics.
+- [x] **AC-4:** Evaluates commands into Antigravity decision outcomes emitted as JSON on stdout:
   - `{"decision": "allow"}`: local git read/write, `task *` invocations, `uv`, `pytest`, `ruff`, `agy`, python execution.
   - `{"decision": "ask", "reason": "..."}`: external pushes (`git push`), operations requiring operator confirmation.
   - `{"decision": "deny", "reason": "..."}`: destructive root removals, attempts to write outside workspace, or credential probing.
-- [ ] **AC-5:** Remote Agent Compatibility: `command_guard.py` runs non-interactively on macOS and Linux (glibc cloud VMs), gracefully handling EOF/empty input without hanging.
-- [ ] **AC-6:** Unit tests in `tests/test_command_guard.py` verify that safe `task` commands emit `"allow"`, dangerous commands emit `"deny"`, pushes emit `"ask"`, and headless stdin payloads are parsed cleanly.
+- [x] **AC-5:** Remote Agent Compatibility: `command_guard.py` runs non-interactively on macOS and Linux (glibc cloud VMs), gracefully handling EOF/empty input without hanging.
+- [x] **AC-6:** Unit tests in `tests/test_command_guard.py` verify that safe `task` commands emit `"allow"`, dangerous commands emit `"deny"`, pushes emit `"ask"`, and headless stdin payloads are parsed cleanly.
 
 ---
 
@@ -119,6 +119,6 @@ Plugin-level hook (`plugin/hooks.json`):
 
 ## 5. Verification & Definition of Done
 
-- [ ] Run `python3 .agents/scripts/command_guard.py` with payload `{"toolCall": {"name": "run_command", "args": {"CommandLine": "task check"}}}` and verify stdout contains `{"decision": "allow"}`.
-- [ ] Run with dangerous payload `{"CommandLine": "rm -rf /"}` and verify stdout contains `{"decision": "deny"}`.
-- [ ] Run `uv run pytest tests/test_command_guard.py` with 100% pass rate.
+- [x] Run `python3 .agents/scripts/command_guard.py` with payload `{"toolCall": {"name": "run_command", "args": {"CommandLine": "task check"}}}` and verify stdout contains `{"decision": "allow"}`.
+- [x] Run with dangerous payload `{"CommandLine": "rm -rf /"}` and verify stdout contains `{"decision": "deny"}`.
+- [x] Run `uv run pytest tests/test_command_guard.py` with 100% pass rate.
