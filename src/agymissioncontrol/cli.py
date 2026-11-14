@@ -9,9 +9,26 @@ from typing import Annotated
 
 import typer
 from rich.console import Console
+from rich.tree import Tree
 
 import agymissioncontrol
 from agymissioncontrol.config import CreditPolicy, CreditTrigger, load_config
+from agymissioncontrol.manifest import (
+    CyclicDependencyError,
+    DependencyResolver,
+    GitHubTracker,
+    GitLabTracker,
+    IssueTracker,
+    MockTracker,
+    RawIssue,
+    TaskItem,
+    TrackerError,
+    extract_task_spec,
+    merge_manifests,
+    parse_manifest_document,
+    sanitize_issue_body,
+    serialize_manifest,
+)
 from agymissioncontrol.quota import (
     AgyCliProvider,
     MockProvider,
@@ -261,6 +278,177 @@ def gate(
         typer.echo(f"HARD_LOCKOUT: {decision.reason}")
 
     raise typer.Exit(code=decision.exit_code)
+
+
+def _fetch_issues_for_plan(
+    *,
+    provider: str,
+    fixture: Path | None,
+    milestone: str | None,
+    labels: list[str] | None,
+    issue: int | None,
+) -> list[RawIssue]:
+    normalized = provider.strip().lower()
+    if normalized not in {"auto", "github", "gh", "gitlab", "glab", "mock"}:
+        typer.echo(
+            f"Unsupported tracker provider {provider!r}. Choose auto, github, gitlab, or mock.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    if fixture is not None or normalized == "mock" or os.environ.get("AGY_MC_MOCK_PROVIDER") == "1":
+        tracker: IssueTracker = MockTracker(fixture)
+        return tracker.fetch_issues(milestone=milestone, labels=labels, issue_number=issue)
+
+    if normalized in {"gitlab", "glab"}:
+        return GitLabTracker().fetch_issues(milestone=milestone, labels=labels, issue_number=issue)
+
+    if normalized in {"github", "gh"}:
+        return GitHubTracker().fetch_issues(milestone=milestone, labels=labels, issue_number=issue)
+
+    # `auto` tries GitHub first and falls back to offline mock fixtures if `gh` is unavailable.
+    try:
+        return GitHubTracker().fetch_issues(milestone=milestone, labels=labels, issue_number=issue)
+    except TrackerError:
+        return MockTracker(fixture).fetch_issues(
+            milestone=milestone, labels=labels, issue_number=issue
+        )
+
+
+def _render_plan_tree(tasks: list[TaskItem], console: Console) -> None:
+    tree = Tree(f"Task Execution Plan ({len(tasks)} tasks):")
+    for idx, task in enumerate(tasks, start=1):
+        dep_note = f"Depends on: {', '.join(task.depends_on)}" if task.depends_on else "Independent"
+        tree.add(f"{idx}. {task.task_id}: {task.title} ({dep_note})")
+    console.print(tree)
+
+
+@app.command()
+def plan(
+    issue: Annotated[
+        int | None,
+        typer.Option("--issue", help="Compile a single issue number into the task manifest."),
+    ] = None,
+    provider: Annotated[
+        str,
+        typer.Option(
+            "--provider",
+            help="Issue tracker provider to query: auto, github, gitlab, or mock.",
+        ),
+    ] = "auto",
+    milestone: Annotated[
+        str | None,
+        typer.Option("--milestone", help="Filter upstream issues by milestone title."),
+    ] = None,
+    label: Annotated[
+        list[str] | None,
+        typer.Option("--label", help="Filter upstream issues by label (repeatable)."),
+    ] = None,
+    default_test: Annotated[
+        str | None,
+        typer.Option(
+            "--default-test",
+            help="Fallback verification command when none is present in an issue.",
+        ),
+    ] = None,
+    output: Annotated[
+        Path | None,
+        typer.Option("--output", "-o", help="Target path for generated TASKS.md manifest."),
+    ] = None,
+    suggest_order: Annotated[
+        bool,
+        typer.Option(
+            "--suggest-order/--no-suggest-order",
+            help="Suggest topological & module-clustered execution order.",
+        ),
+    ] = True,
+    dry_run: Annotated[
+        bool,
+        typer.Option(
+            "--dry-run",
+            help="Display execution plan and manifest preview without writing to disk.",
+        ),
+    ] = False,
+    fixture: Annotated[
+        Path | None,
+        typer.Option("--fixture", help="JSON/YAML fixture file for offline mock issue ingestion."),
+    ] = None,
+    config: Annotated[
+        Path | None,
+        typer.Option("--config", "-c", help="Path to .agymissioncontrol.yaml."),
+    ] = None,
+    project_dir: Annotated[
+        Path | None,
+        typer.Option("--project-dir", help="Project root directory."),
+    ] = None,
+) -> None:
+    """Compile upstream issues into a dependency-ordered `TASKS.md` execution manifest."""
+    cfg = load_config(config_path=config, project_dir=project_dir)
+    assert cfg.paths is not None
+
+    fallback_test = (default_test or cfg.execution.verify_command or "pytest").strip()
+    target_path = output.resolve() if output is not None else cfg.paths.manifest_path
+
+    try:
+        raw_issues = _fetch_issues_for_plan(
+            provider=provider,
+            fixture=fixture,
+            milestone=milestone,
+            labels=label,
+            issue=issue,
+        )
+    except TrackerError as exc:
+        typer.echo(f"Error fetching issues: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    if not raw_issues:
+        typer.echo("No matching issues found.")
+        return
+
+    compiled_tasks = [
+        extract_task_spec(
+            sanitize_issue_body(raw.body),
+            raw.title,
+            raw.number,
+            fallback_test,
+            labels=raw.labels,
+            blocked_by_numbers=raw.blocked_by_numbers,
+        )
+        for raw in raw_issues
+    ]
+
+    existing_header: str | None = None
+    try:
+        if target_path.exists():
+            existing_content = target_path.read_text(encoding="utf-8")
+            parsed_header, existing_tasks = parse_manifest_document(existing_content)
+            existing_header = parsed_header or None
+            ordered_tasks = merge_manifests(
+                existing_tasks,
+                compiled_tasks,
+                suggest_order=suggest_order,
+            )
+        else:
+            ordered_tasks = DependencyResolver().resolve(
+                compiled_tasks,
+                suggest_order=suggest_order,
+            )
+    except (CyclicDependencyError, ValueError) as exc:
+        typer.echo(f"Error resolving task dependencies: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    console = Console()
+    _render_plan_tree(ordered_tasks, console)
+    rendered_manifest = serialize_manifest(ordered_tasks, header=existing_header)
+
+    if dry_run:
+        typer.echo("\n--- Preview (--dry-run, not written to disk) ---")
+        typer.echo(rendered_manifest, nl=False)
+        return
+
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    target_path.write_text(rendered_manifest, encoding="utf-8")
+    typer.echo(f"Wrote {len(ordered_tasks)} task(s) to {target_path}")
 
 
 if __name__ == "__main__":
