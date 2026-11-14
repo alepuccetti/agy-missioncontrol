@@ -2,7 +2,7 @@
 
 - **Task ID:** `E00-T05`
 - **Parent Epic:** [Epic E00: Workspace Permissions, Command Guards, Python Tooling & Repository Setup](./EPIC.md)
-- **Status:** `[ ] TODO`
+- **Status:** `[x] DONE`
 - **Execution Mode:** ⚡ Direct
 - **Primary Agent:** `infra-specialist` (or Primary Orchestrator)
 - **Dependencies:** `E00-T01`
@@ -19,14 +19,14 @@
 
 ## 2. Testable Acceptance Criteria
 
-- [ ] **AC-1:** `gh auth status` verifies that GitHub CLI is authenticated with `repo` scopes.
-- [ ] **AC-2:** Public open-source GitHub repository `origin` is confirmed or created using `gh repo create agymissioncontrol --public --source=. --remote=origin` / `git remote add`.
-- [ ] **AC-3:** Standard label taxonomy script `scripts/setup_labels.sh` is created to provision labels:
+- [x] **AC-1:** `gh auth status` verifies that GitHub CLI is authenticated with `repo` scopes.
+- [x] **AC-2:** Public open-source GitHub repository `origin` is confirmed or created using `gh repo create agymissioncontrol --public --source=. --remote=origin` / `git remote add`.
+- [x] **AC-3:** Standard label taxonomy script `scripts/setup_labels.sh` is created to provision labels:
   - `agent-ready`: Issues validated for autonomous agent execution.
   - `epic`: Milestone parent issues.
   - `blocked`: Tasks requiring human intervention or prerequisite tasks.
   - `area/quota`, `area/manifest`, `area/runner`, `area/cli`.
-- [ ] **AC-4:** Script executes idempotently via `gh label create --force`.
+- [x] **AC-4:** Script executes idempotently via `gh label create --force`.
 
 ---
 
@@ -66,6 +66,6 @@ done
 
 ## 5. Verification & Definition of Done
 
-- [ ] Execute `gh auth status` and confirm valid token.
-- [ ] Execute `bash scripts/setup_labels.sh` and verify all labels exist on GitHub.
-- [ ] Verify `git remote -v` outputs valid remote origin.
+- [x] Execute `gh auth status` and confirm valid token.
+- [x] Execute `bash scripts/setup_labels.sh` and verify all labels exist on GitHub.
+- [x] Verify `git remote -v` outputs valid remote origin.

@@ -36,7 +36,7 @@ flowchart TD
 
 | Milestone | Epic ID | Epic Title | Tasks | Status |
 | :--- | :--- | :--- | :---: | :---: |
-| **`v0.1.0-alpha`** | **[E00](./E00/EPIC.md)** | Workspace Setup, Developer Tooling & Permissions Guardrails | 5 | `[ ] TODO` |
+| **`v0.1.0-alpha`** | **[E00](./E00/EPIC.md)** | Workspace Setup, Developer Tooling & Permissions Guardrails | 5 | `[x] DONE` |
 | | **[E01](./E01/EPIC.md)** | Quota Governor, Dual-Tier Quota & Session Circuit Breakers (`gate` / `status`) | 5 | `[ ] TODO` |
 | **`v0.2.0-beta`** | **[E02](./E02/EPIC.md)** | Auxiliary Bootstrap Tool: Issue-to-Task List Generator (`plan` / `TASKS.md`) | 5 | `[ ] TODO` |
 | | **[E03](./E03/EPIC.md)** | Autonomous Execution Runner, Detached Supervisor & Telemetry (`run`) | 5 | `[ ] TODO` |
@@ -53,10 +53,10 @@ flowchart TD
 
 #### [Epic E00: Workspace Setup, Developer Tooling & Permissions Guardrails](./E00/EPIC.md)
 * **[E00-T01](./E00/T01-git-init-and-ignore.md):** `[⚡ Direct]` `[x] DONE` — Git Repository Initialization, MIT License, Branch Protection Baseline & `.gitignore`
-* **[E00-T02](./E00/T02-python-packaging-and-uv-setup.md):** `[⚡ Direct]` — Modern Python Packaging (`pyproject.toml`), Dependency Pinning, `uv tool install -e .` & Standalone Binary Tooling
-* **[E00-T03](./E00/T03-antigravity-hooks-and-command-guard.md):** `[🧠 Deep Verify]` — Antigravity Pre-Tool Hooks (`.agents/hooks.json`), `plugin.json` & `command_guard.py` for macOS & Linux Cloud VMs
-* **[E00-T04](./E00/T04-dev-automation-taskfile.md):** `[⚡ Direct]` — Developer Automation (`Taskfile.yml`) & Pinned LTS GitHub Actions CI Workflow (`.github/workflows/ci.yml`)
-* **[E00-T05](./E00/T05-github-remote-link-and-labels.md):** `[⚡ Direct]` — GitHub CLI Integration, Remote Origin Setup & Standard Issue Label Taxonomy
+* **[E00-T02](./E00/T02-python-packaging-and-uv-setup.md):** `[⚡ Direct]` `[x] DONE` — Modern Python Packaging (`pyproject.toml`), Dependency Pinning, `uv tool install -e .` & Standalone Binary Tooling
+* **[E00-T03](./E00/T03-antigravity-hooks-and-command-guard.md):** `[🧠 Deep Verify]` `[x] DONE` — Antigravity Pre-Tool Hooks (`.agents/hooks.json`), `plugin.json` & `command_guard.py` for macOS & Linux Cloud VMs
+* **[E00-T04](./E00/T04-dev-automation-taskfile.md):** `[⚡ Direct]` `[x] DONE` — Developer Automation (`Taskfile.yml`) & Pinned LTS GitHub Actions CI Workflow (`.github/workflows/ci.yml`)
+* **[E00-T05](./E00/T05-github-remote-link-and-labels.md):** `[⚡ Direct]` `[x] DONE` — GitHub CLI Integration, Remote Origin Setup & Standard Issue Label Taxonomy
 
 #### [Epic E01: Quota Governor, Dual-Tier Quota & Session Circuit Breakers (`gate` / `status`)](./E01/EPIC.md)
 * **[E01-T01](./E01/T01-config-models-and-loader.md):** `[⚡ Direct]` — Strongly Typed Configuration Models (`.agymissioncontrol.yaml`), Project Scoping (`--project-dir`) & Discovery Engine
