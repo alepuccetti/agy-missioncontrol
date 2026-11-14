@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import sqlite3
 import subprocess
 from abc import ABC, abstractmethod
 from collections.abc import Callable
@@ -12,7 +11,6 @@ from pathlib import Path
 from typing import Any
 
 from agymissioncontrol.quota.locks import (
-    get_registry_db_path,
     get_shared_model_lock_details,
     resolve_quota_group,
 )
@@ -285,72 +283,13 @@ def parse_usage_json(
     raise ValueError("Usage payload must contain 'command.data.groups' or 'models'")
 
 
-def _init_quota_snapshots_table(conn: sqlite3.Connection) -> None:
-    conn.execute("PRAGMA journal_mode=WAL;")
-    conn.execute("PRAGMA busy_timeout = 30000;")
-    conn.execute("PRAGMA synchronous=NORMAL;")
-    conn.execute("PRAGMA user_version = 1;")
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS quota_snapshots (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            model_family TEXT NOT NULL,
-            limit_type TEXT NOT NULL,
-            remaining_pct REAL NOT NULL,
-            reset_at TIMESTAMP NOT NULL,
-            raw_line TEXT
-        );
-        """
-    )
-    conn.execute(
-        """
-        CREATE INDEX IF NOT EXISTS idx_quota_snapshots_ts
-        ON quota_snapshots (model_family, limit_type, timestamp);
-        """
-    )
-
-
 def _persist_snapshot_records(
     records: list[QuotaSnapshotRecord],
     project_dir: Path | None = None,
 ) -> None:
-    if not records:
-        return
-    targets = [get_registry_db_path()]
-    if project_dir is not None:
-        runtime_dir = project_dir.resolve() / ".agymissioncontrol"
-        runtime_dir.mkdir(parents=True, exist_ok=True)
-        targets.append(runtime_dir / "missioncontrol.db")
+    from agymissioncontrol.quota.ledger import record_quota_snapshots
 
-    rows = [
-        (
-            _ensure_utc(rec.recorded_at).isoformat(),
-            rec.model_family,
-            rec.limit_type,
-            rec.remaining_pct,
-            _ensure_utc(rec.reset_at).isoformat(),
-            rec.raw_line,
-        )
-        for rec in records
-    ]
-
-    for db_path in targets:
-        db_path.parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(str(db_path), timeout=30.0)
-        try:
-            _init_quota_snapshots_table(conn)
-            conn.executemany(
-                """
-                INSERT INTO quota_snapshots (
-                    timestamp, model_family, limit_type, remaining_pct, reset_at, raw_line
-                ) VALUES (?, ?, ?, ?, ?, ?)
-                """,
-                rows,
-            )
-            conn.commit()
-        finally:
-            conn.close()
+    record_quota_snapshots(records, project_dir=project_dir)
 
 
 def _build_models_from_records(
