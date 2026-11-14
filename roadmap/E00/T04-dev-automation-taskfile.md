@@ -55,6 +55,9 @@
 ```yaml
 version: '3'
 
+env:
+  UV_PROJECT_ENVIRONMENT: "{{.HOME}}/.virtualenvs/agymissioncontrol"
+
 vars:
   PACKAGE_NAME: agymissioncontrol
   SRC_DIR: src/agymissioncontrol

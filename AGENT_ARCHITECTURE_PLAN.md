@@ -54,7 +54,9 @@ agy-missioncontrol/
    - Keep modules flat and modular (~300 LOC target for functional modules; up to ~500 LOC for schemas, AST parsers, and test suites).
    - Do not add unapproved dependencies. In particular, `E04-T04` must use Python stdlib `http.server` (no FastAPI/Flask) so standalone PyInstaller binaries stay lean.
    - Use permissive open-source licenses only (`MIT`, `Apache-2.0`, `BSD-*`, `ISC`, `PSF`).
-- **Mandatory Verification Gate (`task check`):** Every task must pass `ruff format --check`, `ruff check`, and `pytest` on Python `3.15` (`.python-version` = `3.15`) before marking `[x] DONE` in `roadmap/`.
+5. **External Virtualenv & Mandatory Verification Gate (`task check`):**
+   - Virtual environments must live **outside the repository** at `~/.virtualenvs/agymissioncontrol` (via `UV_PROJECT_ENVIRONMENT`), keeping the repo free of `.venv/` directories.
+   - Every task must pass `ruff format --check`, `ruff check`, and `pytest` on Python `3.15` (`.python-version` = `3.15`) before marking `[x] DONE` in `roadmap/`.
 
 ---
 
