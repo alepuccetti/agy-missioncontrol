@@ -33,6 +33,9 @@ coverage.xml
 .agymissioncontrol/
 *.log
 
+# Local planning & roadmap (kept local / mirrored to GitHub Issues & Projects)
+roadmap/
+
 # OS & IDE metadata
 .DS_Store
 .idea/
