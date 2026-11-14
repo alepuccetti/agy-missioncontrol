@@ -1,5 +1,12 @@
-"""Quota telemetry models, cross-project lock registry, ledger, and providers."""
+"""Quota telemetry models, cross-project lock registry, ledger, and governor."""
 
+from agymissioncontrol.quota.governor import (
+    GateAction,
+    GateDecision,
+    evaluate_and_gate,
+    evaluate_gate_decision,
+    execute_sleep,
+)
 from agymissioncontrol.quota.ledger import (
     get_credit_spend,
     get_db,
@@ -47,6 +54,8 @@ __all__ = [
     "AgyCliProvider",
     "DEFAULT_POOL_CAPACITIES",
     "DEFAULT_PRICING",
+    "GateAction",
+    "GateDecision",
     "MockProvider",
     "ModelQuota",
     "PricingModel",
@@ -61,6 +70,9 @@ __all__ = [
     "clear_shared_model_lock",
     "estimate_directional_allowance_pct",
     "estimate_quota_impact",
+    "evaluate_and_gate",
+    "evaluate_gate_decision",
+    "execute_sleep",
     "fetch_usage_json",
     "get_credit_spend",
     "get_db",
