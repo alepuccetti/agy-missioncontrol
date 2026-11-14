@@ -55,7 +55,7 @@
 ```
 
 ### 4.2 `.agents/hooks.json` & `plugin/hooks.json`
-Workspace-level hook (`.agents/hooks.json`):
+Workspace-level hook (`.agents/hooks.json`, executed with cwd `.agents/` per Antigravity hook rules):
 ```json
 {
   "command-guard": {
@@ -65,7 +65,7 @@ Workspace-level hook (`.agents/hooks.json`):
         "hooks": [
           {
             "type": "command",
-            "command": "python3 .agents/scripts/command_guard.py"
+            "command": "python3 scripts/command_guard.py"
           }
         ]
       }

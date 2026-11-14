@@ -36,7 +36,7 @@ def test_hook_configs_and_plugin_manifest() -> None:
     plugin_hooks = json.loads((REPO_ROOT / "plugin" / "hooks.json").read_text())
 
     for hooks, expected_cmd in (
-        (workspace_hooks, "python3 .agents/scripts/command_guard.py"),
+        (workspace_hooks, "python3 scripts/command_guard.py"),
         (plugin_hooks, "python3 scripts/command_guard.py"),
     ):
         entries = hooks["command-guard"]["PreToolUse"]
