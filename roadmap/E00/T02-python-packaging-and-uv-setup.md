@@ -2,7 +2,7 @@
 
 - **Task ID:** `E00-T02`
 - **Parent Epic:** [Epic E00: Workspace Permissions, Command Guards, Python Tooling & Repository Setup](./EPIC.md)
-- **Status:** `[ ] TODO`
+- **Status:** `[x] DONE`
 - **Execution Mode:** ⚡ Direct
 - **Primary Agent:** `infra-specialist` (or Primary Orchestrator)
 - **Dependencies:** `E00-T01`
@@ -19,13 +19,13 @@
 
 ## 2. Testable Acceptance Criteria
 
-- [ ] **AC-1:** `pyproject.toml` and `.python-version` (`3.15`) are created at the repository root configuring `build-system` with `hatchling`.
-- [ ] **AC-2:** Python version is constrained to `>=3.15` (pinned to `3.15` in `.python-version`).
-- [ ] **AC-3:** Core dependencies are declared: `typer>=0.29.0`, `pydantic>=2.14.0`, `pyyaml>=6.0.3`, `rich>=15.0.0`.
-- [ ] **AC-4:** Development & build dependencies declared in `dev` group: `pytest>=9.2.0`, `pytest-mock>=3.17.0`, `ruff>=0.17.0`, `pyinstaller>=6.22.0`.
-- [ ] **AC-5:** CLI entrypoint `agymissioncontrol = "agymissioncontrol.cli:app"` is registered.
-- [ ] **AC-6:** Tool configs for `ruff` and `pytest` are embedded in `pyproject.toml`.
-- [ ] **AC-7:** `uv tool install --editable . --force` installs `agymissioncontrol` into `~/.local/bin/` backed by an isolated virtualenv pointing directly to local `src/agymissioncontrol/` for instant live reloads.
+- [x] **AC-1:** `pyproject.toml` and `.python-version` (`3.15`) are created at the repository root configuring `build-system` with `hatchling`.
+- [x] **AC-2:** Python version is constrained to `>=3.15` (pinned to `3.15` in `.python-version`).
+- [x] **AC-3:** Core dependencies are declared: `typer>=0.29.0`, `pydantic>=2.14.0`, `pyyaml>=6.0.3`, `rich>=15.0.0`.
+- [x] **AC-4:** Development & build dependencies declared in `dev` group: `pytest>=9.2.0`, `pytest-mock>=3.17.0`, `ruff>=0.17.0`, `pyinstaller>=6.22.0`.
+- [x] **AC-5:** CLI entrypoint `agymissioncontrol = "agymissioncontrol.cli:app"` is registered.
+- [x] **AC-6:** Tool configs for `ruff` and `pytest` are embedded in `pyproject.toml`.
+- [x] **AC-7:** `uv tool install --editable . --force` installs `agymissioncontrol` into `~/.local/bin/` backed by an isolated virtualenv pointing directly to local `src/agymissioncontrol/` for instant live reloads.
 
 ---
 
@@ -63,7 +63,7 @@ dependencies = [
     "rich>=15.0.0",
 ]
 
-[project.optional-dependencies]
+[dependency-groups]
 dev = [
     "pytest>=9.2.0",
     "pytest-mock>=3.17.0",
@@ -94,7 +94,7 @@ pythonpath = ["src"]
 
 ## 5. Verification & Definition of Done
 
-- [ ] Run `uv venv` and `uv sync --dev`.
-- [ ] Run `uv tool install --editable . --force` and verify `which agymissioncontrol` points to `~/.local/bin/agymissioncontrol`.
-- [ ] Execute `agymissioncontrol --version` and confirm output `0.1.0`.
-- [ ] Verify that editing `src/agymissioncontrol/__init__.py` updates `agymissioncontrol --version` output immediately without reinstalling.
+- [x] Set `UV_PROJECT_ENVIRONMENT="$HOME/.virtualenvs/agymissioncontrol"` (external venv outside the repository), run `uv venv --python /opt/homebrew/bin/python3` (or `uv sync --dev`), and verify no `.venv/` exists in the repo root.
+- [x] Run `uv tool install --editable . --force` and verify `which agymissioncontrol` points to `~/.local/bin/agymissioncontrol`.
+- [x] Execute `agymissioncontrol --version` and confirm output `0.1.0`.
+- [x] Verify that editing `src/agymissioncontrol/__init__.py` updates `agymissioncontrol --version` output immediately without reinstalling.
