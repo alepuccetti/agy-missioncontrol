@@ -32,55 +32,18 @@ It solves the critical operational bottlenecks of running unattended AI agents:
 
 ## 3. Core Architecture & Workflow
 
-```
-                        ┌──────────────────────────────┐
-                        │   Remote Issue Tracker       │
-                        │   (GitHub / GitLab Issues)   │
-                        └──────────────┬───────────────┘
-                                       │
-                                       ▼  agymissioncontrol plan
-                        ┌──────────────────────────────┐
-                        │       Local Manifest         │
-                        │         (TASKS.md)           │
-                        └──────────────┬───────────────┘
-                                       │
-        ┌──────────────────────────────┴──────────────────────────────┐
-        │                                                              │
-        │  LOOP: Next Unchecked Task in TASKS.md                       ▼
-        │                                              ┌──────────────────────────────┐
-        │                                              │ agymissioncontrol gate       │
-        │                                              │ Query official agy /usage    │
-        │                                              └──────────────┬───────────────┘
-        │                                                             │
-        │                         ┌───────────────────────────────────┴─────────────┐
-        │                         ▼ [Quota < Threshold]                             ▼ [Quota >= Threshold]
-        │             ┌──────────────────────────────┐                              │
-        │             │ OS Blocking Sleep            │                              │
-        │             │ (0 tokens until reset epoch) │                              │
-        │             └───────────┬──────────────────┘                              │
-        │                         │ Woke up (or via agymissioncontrol wake)              │
-        │                         └───────────────────────────────────┐             │
-        │                                                             ▼             ▼
-        │                                              ┌──────────────────────────────┐
-        │                                              │ agymissioncontrol run (Worker)     │
-        │                                              │ - Fresh context per task     │
-        │                                              │ - Implement code edits       │
-        │                                              │ - Run verification command   │
-        │                                              │ - Record SQLite telemetry    │
-        │                                              └──────────────┬───────────────┘
-        │                                                             │
-        │                                              ┌──────────────┴───────────────┐
-        │                                              │ Verification Passed?         │
-        │                                              └──────┬────────────────┬──────┘
-        │                                          Yes │                       │ No (Max Retries)
-        │                                              ▼                       ▼
-        │                                   ┌────────────────────┐   ┌────────────────────┐
-        │                                   │ - Mark [x] in doc  │   │ - Mark [BLOCKED]   │
-        │                                   │ - Log telemetry    │   │ - Log failure      │
-        │                                   │ - Sync remote issue│   │ - Skip dependents  │
-        │                                   └──────────┬─────────┘   └─────────┬──────────┘
-        │                                              │                       │
-        └──────────────────────────────────────────────┴───────────────────────┘
+```mermaid
+flowchart TD
+    Tracker["Remote Issue Tracker\n(GitHub / GitLab Issues)"] -->|"agymissioncontrol plan"| Manifest["Local Manifest\n(TASKS.md)"]
+    Manifest --> Gate["agymissioncontrol gate\nQuery official agy /usage"]
+    Gate -->|"Quota < Threshold"| Sleep["OS Blocking Sleep\n(0 tokens until reset epoch)"]
+    Gate -->|"Quota >= Threshold"| Worker["agymissioncontrol run (Worker)\n- Fresh context per task\n- Implement code edits\n- Run verification command\n- Record SQLite telemetry"]
+    Sleep -->|"Woke up (or via agymissioncontrol wake)"| Worker
+    Worker --> Verify{"Verification Passed?"}
+    Verify -->|"Yes"| Pass["- Mark [x] in doc\n- Log telemetry\n- Sync remote issue"]
+    Verify -->|"No (Max Retries)"| Fail["- Mark [BLOCKED]\n- Log failure\n- Skip dependents"]
+    Pass -->|"Next Unchecked Task in TASKS.md"| Gate
+    Fail -->|"Next Unchecked Task in TASKS.md"| Gate
 ```
 
 ---
@@ -208,9 +171,6 @@ Command: agymissioncontrol dashboard
 - **Milestone v0.1.0-alpha (Foundational Setup & Quota Gatekeeper):** Workspace setup, developer tooling (`Taskfile.yml`), permissions guardrails, dual-tier quota governor (`gate`/`status`), embedded SQLite ledger (`missioncontrol.db`), AI credit budget governance, and Mission Control overhead accounting.
 - **Milestone v0.2.0-beta (Auxiliary Bootstrapper & Autonomous Execution Runner):** Issue-to-manifest compiler (`plan`), topological dependency DAG, autonomous supervisor loop (`run` with native `--detach`), closed stdin, timeout protection, pre-flight baseline checks, per-task quota/token metering, credit circuit breaker, and public GitHub Actions release pipeline.
 - **Milestone v1.0.0 GA (Multi-Agent Registry & Live Web Cockpit):** SQLite-backed multi-agent process registry (`registry.db`), CLI `ps`/`wake`/`stop`/`logs`, early wakeups via `SIGUSR1`, and zero-dependency dark-mode web cockpit (TypeScript + Alpine.js + Lucide) on `localhost:8484`.
-
-For full task manifests and technical specifications, see:
-* **[roadmap/ROADMAP.md](roadmap/ROADMAP.md)**
 
 ---
 
