@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -12,11 +13,17 @@ from typer.testing import CliRunner
 from agymissioncontrol.cli import app
 
 runner = CliRunner()
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+
+
+def _strip_ansi(text: str) -> str:
+    return _ANSI_RE.sub("", text)
 
 
 def test_plan_help_exposes_all_required_options() -> None:
     result = runner.invoke(app, ["plan", "--help"])
     assert result.exit_code == 0
+    clean = _strip_ansi(result.output)
     for flag in (
         "--issue",
         "--provider",
@@ -27,7 +34,7 @@ def test_plan_help_exposes_all_required_options() -> None:
         "--suggest-order",
         "--dry-run",
     ):
-        assert flag in result.output
+        assert flag in clean
 
 
 def test_plan_dry_run_displays_rich_tree_and_does_not_write_file(tmp_path: Path) -> None:
@@ -37,10 +44,11 @@ def test_plan_dry_run_displays_rich_tree_and_does_not_write_file(tmp_path: Path)
         ["plan", "--provider", "mock", "--dry-run", "--output", str(target)],
     )
     assert result.exit_code == 0
-    assert "Task Execution Plan (3 tasks):" in result.output
-    assert "1. TASK-101:" in result.output
-    assert "(Depends on: TASK-101" in result.output
-    assert "--dry-run, not written to disk" in result.output
+    clean = _strip_ansi(result.output)
+    assert "Task Execution Plan (3 tasks):" in clean
+    assert "1. TASK-101:" in clean
+    assert "(Depends on: TASK-101" in clean
+    assert "--dry-run, not written to disk" in clean
     assert not target.exists()
 
 
@@ -147,7 +155,7 @@ def test_plan_single_issue_label_filter_and_cycle_detection(tmp_path: Path) -> N
         ["plan", "--fixture", str(cyclic_fixture), "--output", str(out)],
     )
     assert err_res.exit_code == 1
-    assert "Cycle detected" in err_res.output
+    assert "Cycle detected" in _strip_ansi(err_res.output)
     assert not out.exists()
 
     # Single issue selection on default mock provider
@@ -156,8 +164,9 @@ def test_plan_single_issue_label_filter_and_cycle_detection(tmp_path: Path) -> N
         ["plan", "--provider", "mock", "--issue", "101", "--label", "core", "--dry-run"],
     )
     assert single_res.exit_code == 0
-    assert "Task Execution Plan (1 tasks):" in single_res.output
-    assert "TASK-101" in single_res.output
+    single_clean = _strip_ansi(single_res.output)
+    assert "Task Execution Plan (1 tasks):" in single_clean
+    assert "TASK-101" in single_clean
 
 
 def test_plan_auto_falls_back_offline_and_explicit_provider_fails_cleanly(
@@ -171,14 +180,14 @@ def test_plan_auto_falls_back_offline_and_explicit_provider_fails_cleanly(
         ["plan", "--provider", "github", "--output", str(tmp_path / "TASKS.md")],
     )
     assert explicit_err.exit_code == 1
-    assert "Error fetching issues" in explicit_err.output
+    assert "Error fetching issues" in _strip_ansi(explicit_err.output)
 
     auto_ok = runner.invoke(
         app,
         ["plan", "--provider", "auto", "--dry-run"],
     )
     assert auto_ok.exit_code == 0
-    assert "Task Execution Plan (3 tasks):" in auto_ok.output
+    assert "Task Execution Plan (3 tasks):" in _strip_ansi(auto_ok.output)
 
     # Verify mocked gh JSON works seamlessly with `--provider github`
     gh_payload = [
@@ -204,4 +213,4 @@ def test_plan_auto_falls_back_offline_and_explicit_provider_fails_cleanly(
         ["plan", "--provider", "github", "--dry-run"],
     )
     assert gh_res.exit_code == 0
-    assert "TASK-501: Add telemetry export" in gh_res.output
+    assert "TASK-501: Add telemetry export" in _strip_ansi(gh_res.output)
