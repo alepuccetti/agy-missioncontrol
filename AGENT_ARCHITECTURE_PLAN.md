@@ -59,6 +59,7 @@ agy-missioncontrol/
    - Updating only the local `roadmap/` markdown or the parent Epic issue is insufficient. For **every task (`E0X-T0Y`) AND parent epic (`E0X`)**, once `task check` passes and the signed commit is created:
      1. Update local `roadmap/E0X/T0Y-*.md`, `roadmap/E0X/EPIC.md`, and `roadmap/ROADMAP.md` (`- **Status:** \`[x] DONE\``, `- **Implementing Commits (\`main\`):**`, and `[x]` on all AC, Task table, and Verification / DoD checkboxes).
      2. Propagate those completed statuses, checked Acceptance Criteria / Verification / DoD checkboxes, and implementing commit links to the **GitHub Task Issue** (`gh issue edit <task-issue> --body-file ...`) and **GitHub Epic Issue** (`gh issue edit <epic-issue> --body-file ...`) **before** closing (or reference `Fixes #...` in PR descriptions when working on feature branches), preserving each issue's top callout header (`> **Parent Epic:**`, `> **Blocked by:**`, `### Tracked Tasks`) and rewriting relative `../../README.md` links to GitHub `blob/main/README.md`.
+     3. Track Epics on GitHub using the **GitHub Issue Type `Epic`** (`gh issue create --type Epic` / `gh issue edit <epic-issue> --type Epic`), **never** an `epic` label.
 
 ---
 
