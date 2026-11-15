@@ -16,9 +16,11 @@ from agymissioncontrol.quota import (
     MockProvider,
     UsageTelemetry,
     check_shared_model_lock,
+    clear_shared_model_lock,
     evaluate_and_gate,
     evaluate_gate_decision,
     execute_sleep,
+    get_shared_model_lock_details,
     record_token_transaction,
     set_shared_model_lock,
 )
@@ -346,3 +348,30 @@ def test_evaluate_and_gate_max_sleep_and_ledger_budget_cap(
     )
     assert lockout_decision.exit_code == 2
     assert lockout_decision.action == GateAction.LOCKOUT_CREDIT_BUDGET
+
+
+def test_shared_lock_monotonicity_and_conditional_clear(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("AGY_MC_STATE_DIR", str(tmp_path / "state"))
+    now = datetime.now(UTC)
+    rolling_until = now + timedelta(minutes=15)
+    weekly_until = now + timedelta(days=4)
+
+    set_shared_model_lock("claude-opus", weekly_until, reason="WEEKLY_LOCKOUT")
+    # Shorter rolling lock must NOT overwrite active longer weekly lockout
+    set_shared_model_lock("claude-sonnet-4-6", rolling_until, reason="5H_ROLLING_EXHAUSTED")
+
+    details = get_shared_model_lock_details("claude-3-7-sonnet")
+    assert details is not None
+    assert details["reason"] == "WEEKLY_LOCKOUT"
+    assert details["locked_until"] == weekly_until
+
+    # Waking from rolling window must NOT clear newer weekly lockout
+    clear_shared_model_lock("claude-3-7-sonnet", max_locked_until=rolling_until)
+    still_locked = get_shared_model_lock_details("claude-3-7-sonnet")
+    assert still_locked is not None
+    assert still_locked["reason"] == "WEEKLY_LOCKOUT"
+
+    clear_shared_model_lock("claude-3-7-sonnet", max_locked_until=weekly_until)
+    assert check_shared_model_lock("claude-3-7-sonnet") is None

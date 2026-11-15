@@ -186,17 +186,17 @@ def list_active_sessions(prune_dead: bool = True) -> list[SessionState]:
                 "SELECT * FROM sessions ORDER BY updated_at DESC, pid ASC;"
             ).fetchall()
             alive: list[SessionState] = []
-            dead_pids: list[int] = []
+            dead_rows: list[tuple[int, str]] = []
             for row in rows:
                 pid = int(row["pid"])
                 if is_pid_alive(pid):
                     alive.append(_row_to_session(row))
                 else:
-                    dead_pids.append(pid)
-            if prune_dead and dead_pids:
+                    dead_rows.append((pid, str(row["updated_at"])))
+            if prune_dead and dead_rows:
                 conn.executemany(
-                    "DELETE FROM sessions WHERE pid = ?;",
-                    [(pid,) for pid in dead_pids],
+                    "DELETE FROM sessions WHERE pid = ? AND updated_at = ?;",
+                    dead_rows,
                 )
             return alive
     finally:
@@ -248,7 +248,7 @@ def wake_session(pid: int) -> bool:
     try:
         os.kill(pid, signal.SIGUSR1)
         return True
-    except ProcessLookupError:
+    except ProcessLookupError, PermissionError:
         unregister_session(pid)
         return False
 
@@ -258,7 +258,7 @@ def stop_session(pid: int) -> bool:
     try:
         os.kill(pid, signal.SIGTERM)
         return True
-    except ProcessLookupError:
+    except ProcessLookupError, PermissionError:
         unregister_session(pid)
         return False
 

@@ -262,3 +262,90 @@ def test_concurrent_threaded_registrations_no_lock_errors(isolated_registry: Pat
     finally:
         conn.close()
     assert count == 16
+
+
+def test_pid_reuse_updated_at_and_permission_error_safety(isolated_registry: Path) -> None:
+    """Signal helpers handle `PermissionError` and dead-PID pruning guards `updated_at`."""
+    t_old = datetime.now(UTC) - timedelta(minutes=5)
+    t_new = datetime.now(UTC)
+    reused_pid = 52001
+
+    register_session(
+        SessionState(
+            pid=reused_pid,
+            project_name="old-proc",
+            project_dir="/tmp/old-proc",
+            label="stale",
+            model="claude-sonnet-4-6",
+            quota_group="Claude and GPT models",
+            state=SessionStatus.SLEEPING,
+            wakes_at=t_new + timedelta(minutes=10),
+            updated_at=t_old,
+        )
+    )
+
+    with patch(
+        "agymissioncontrol.registry.manager.os.kill",
+        side_effect=PermissionError(1, "Operation not permitted"),
+    ):
+        assert wake_session(reused_pid) is False
+
+    assert list_active_sessions() == []
+
+    register_session(
+        SessionState(
+            pid=reused_pid,
+            project_name="old-proc-2",
+            project_dir="/tmp/old-proc-2",
+            label="stale-2",
+            model="claude-sonnet-4-6",
+            quota_group="Claude and GPT models",
+            state=SessionStatus.ACTIVE,
+            updated_at=t_old,
+        )
+    )
+    with patch(
+        "agymissioncontrol.registry.manager.os.kill",
+        side_effect=PermissionError(1, "Operation not permitted"),
+    ):
+        assert stop_session(reused_pid) is False
+
+    assert list_active_sessions() == []
+
+    # Simulate PID row being re-registered with newer `updated_at` while reader checks liveness.
+    register_session(
+        SessionState(
+            pid=reused_pid,
+            project_name="old-snap",
+            project_dir="/tmp/old-snap",
+            model="claude-sonnet-4-6",
+            quota_group="Claude and GPT models",
+            state=SessionStatus.ACTIVE,
+            updated_at=t_old,
+        )
+    )
+
+    def fake_is_alive_with_concurrent_reregister(pid: int) -> bool:
+        if pid == reused_pid:
+            # Overwrite row directly via separate connection with newer timestamp.
+            conn = get_registry_db()
+            try:
+                with conn:
+                    conn.execute(
+                        "UPDATE sessions SET project_name = ?, updated_at = ? WHERE pid = ?;",
+                        ("new-live-proc", t_new.isoformat(), reused_pid),
+                    )
+            finally:
+                conn.close()
+        return False
+
+    with patch(
+        "agymissioncontrol.registry.manager.is_pid_alive",
+        side_effect=fake_is_alive_with_concurrent_reregister,
+    ):
+        assert list_active_sessions() == []
+
+    with patch("agymissioncontrol.registry.manager.is_pid_alive", return_value=True):
+        surviving = list_active_sessions()
+    assert len(surviving) == 1
+    assert surviving[0].project_name == "new-live-proc"

@@ -14,7 +14,8 @@ import pytest
 from typer.testing import CliRunner
 
 from agymissioncontrol.cli import app
-from agymissioncontrol.quota.locks import clear_shared_model_lock, set_shared_model_lock
+from agymissioncontrol.quota import governor
+from agymissioncontrol.quota.locks import check_shared_model_lock, set_shared_model_lock
 from agymissioncontrol.quota.models import ModelQuota
 from agymissioncontrol.registry import (
     SessionState,
@@ -183,19 +184,30 @@ def test_gate_label_registers_transitions_on_sigusr1_and_unregisters(
                 weekly_remaining_pct=90.0,
             )
 
-    def fake_execute_sleep(*_args: Any, **_kwargs: Any) -> bool:
+    orig_execute_sleep = governor.execute_sleep
+
+    def real_execute_sleep_with_sigusr1(*args: Any, **kwargs: Any) -> bool:
         calls["sleep"] += 1
         active_rows = list_active_sessions()
         assert len(active_rows) == 1
         assert active_rows[0].label == "orchestrator-task"
         seen_states_during_sleep.append(active_rows[0].state)
-        # Clear shared lock when simulating operator wakeup before re-check.
-        clear_shared_model_lock("claude-sonnet-4-6")
-        return False  # Simulate SIGUSR1 wakeup
+        assert check_shared_model_lock("claude-sonnet-4-6") is not None
+
+        def _send_sigusr1(_seconds: float) -> None:
+            os.kill(os.getpid(), signal.SIGUSR1)
+
+        sleep_kwargs = dict(kwargs)
+        sleep_kwargs["sleep_fn"] = _send_sigusr1
+        sleep_kwargs["is_tty"] = False
+        return orig_execute_sleep(*args, **sleep_kwargs)
 
     with (
         patch("agymissioncontrol.cli._build_provider", return_value=_WakeReevalProvider()),
-        patch("agymissioncontrol.quota.governor.execute_sleep", side_effect=fake_execute_sleep),
+        patch(
+            "agymissioncontrol.quota.governor.execute_sleep",
+            side_effect=real_execute_sleep_with_sigusr1,
+        ),
     ):
         res = runner.invoke(
             app,
@@ -214,6 +226,7 @@ def test_gate_label_registers_transitions_on_sigusr1_and_unregisters(
     assert "GO (FREE):" in res.stdout
     assert calls == {"quota": 2, "sleep": 1}
     assert seen_states_during_sleep == [SessionStatus.SLEEPING]
+    assert check_shared_model_lock("claude-sonnet-4-6") is None
     assert list_active_sessions() == []
 
 

@@ -352,6 +352,7 @@ def evaluate_and_gate(
             out_stream=out_stream,
         )
         if completed is False:
+            clear_shared_model_lock(model)
             _emit_event(
                 on_event,
                 "SLEEP_WOKEN",
@@ -365,7 +366,7 @@ def evaluate_and_gate(
                 reset_at=lock_until,
                 woken_early=True,
             )
-        clear_shared_model_lock(model)
+        clear_shared_model_lock(model, max_locked_until=lock_until)
         return GateDecision(
             action=GateAction.PROCEED_FREE,
             reason="Recovered from shared pool lock wait",
@@ -493,6 +494,7 @@ def evaluate_and_gate(
         out_stream=out_stream,
     )
     if completed is False:
+        clear_shared_model_lock(model)
         _emit_event(
             on_event,
             "SLEEP_WOKEN",
@@ -507,7 +509,7 @@ def evaluate_and_gate(
             model_quota=quota,
             woken_early=True,
         )
-    clear_shared_model_lock(model)
+    clear_shared_model_lock(model, max_locked_until=reset_at)
     return GateDecision(
         action=GateAction.PROCEED_FREE,
         reason="Recovered from 5h rolling quota sleep",

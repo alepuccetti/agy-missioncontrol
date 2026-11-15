@@ -131,6 +131,8 @@ def set_shared_model_lock(
                 locked_by_pid = excluded.locked_by_pid,
                 reason = excluded.reason,
                 updated_at = excluded.updated_at
+            WHERE datetime(excluded.locked_until) >= datetime(model_locks.locked_until)
+               OR datetime(model_locks.locked_until) <= datetime('now')
             """,
             (canonical_group, locked_iso, pid, reason, now_iso),
         )
@@ -139,16 +141,31 @@ def set_shared_model_lock(
         conn.close()
 
 
-def clear_shared_model_lock(model: str) -> None:
-    """Remove any cached lock entry for `model` and its canonical shared quota group."""
+def clear_shared_model_lock(model: str, *, max_locked_until: datetime | None = None) -> None:
+    """Remove any cached lock entry for `model` and its canonical shared quota group.
+
+    When ``max_locked_until`` is supplied, only clears locks whose expiry is at or before
+    that threshold so a waking rolling sleeper never removes a newer, longer lockout.
+    """
     canonical_group = resolve_quota_group(model)
     conn = _open_registry_connection()
     try:
         init_model_locks(conn)
-        conn.execute(
-            "DELETE FROM model_locks WHERE model IN (?, ?)",
-            (canonical_group, model),
-        )
+        if max_locked_until is None:
+            conn.execute(
+                "DELETE FROM model_locks WHERE model IN (?, ?)",
+                (canonical_group, model),
+            )
+        else:
+            max_iso = _ensure_utc(max_locked_until).isoformat()
+            conn.execute(
+                """
+                DELETE FROM model_locks
+                WHERE model IN (?, ?)
+                  AND datetime(locked_until) <= datetime(?)
+                """,
+                (canonical_group, model, max_iso),
+            )
         conn.commit()
     finally:
         conn.close()

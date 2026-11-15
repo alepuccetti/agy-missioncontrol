@@ -94,7 +94,7 @@ def stop_detached_dashboard() -> tuple[bool, int | None, str]:
 
     try:
         os.kill(pid, signal.SIGTERM)
-    except ProcessLookupError:
+    except ProcessLookupError, PermissionError:
         pid_path.unlink(missing_ok=True)
         return False, pid, f"Removed stale dashboard.pid for inactive PID {pid}."
 
