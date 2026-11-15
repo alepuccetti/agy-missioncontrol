@@ -193,3 +193,41 @@ def test_token_transactions_overhead_and_credit_spend(
     assert get_credit_spend(proj_dir, since=t_new) == 1.25
     assert get_credit_spend(proj_dir, since=t_new + timedelta(seconds=1)) == 0.0
     assert get_session_token_totals(proj_dir, since=t_new).total_tokens == 200_000
+
+
+def test_get_quota_history_mixed_timestamp_ordering(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("AGY_MC_STATE_DIR", str(tmp_path / "state"))
+    proj_dir = tmp_path / "repo-mixed-ts"
+    proj_dir.mkdir()
+    init_ledger(proj_dir)
+    db_path = proj_dir / ".agymissioncontrol" / "missioncontrol.db"
+
+    conn = sqlite3.connect(str(db_path))
+    try:
+        # Insert out of order across Z, +02:00 offset, and space-delimited SQLite datetime:
+        # 10:00:00Z < 10:30:00 < 13:00:00+02:00 (= 11:00:00Z) < 12:00:00Z
+        reset_at = "2026-11-15T18:00:00Z"
+        rows = [
+            ("2026-11-15T12:00:00Z", "Gemini Models", "five_hour", 40.0, reset_at, "t4"),
+            ("2026-11-15T13:00:00+02:00", "Gemini Models", "five_hour", 60.0, reset_at, "t3"),
+            ("2026-11-15 10:30:00", "Gemini Models", "five_hour", 80.0, reset_at, "t2"),
+            ("2026-11-15T10:00:00Z", "Gemini Models", "five_hour", 90.0, reset_at, "t1"),
+        ]
+        conn.executemany(
+            """
+            INSERT INTO quota_snapshots (
+                timestamp, model_family, limit_type, remaining_pct, reset_at, raw_line
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            rows,
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    by_family = get_quota_history(proj_dir, model_family="Gemini Models", limit=10)
+    assert [entry["raw_line"] for entry in by_family] == ["t1", "t2", "t3", "t4"]
+    all_history = get_quota_history(proj_dir, limit=10)
+    assert [entry["raw_line"] for entry in all_history] == ["t1", "t2", "t3", "t4"]

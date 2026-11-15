@@ -299,24 +299,45 @@ def _build_models_from_records(
 ) -> dict[str, ModelQuota]:
     grouped: dict[str, dict[str, QuotaSnapshotRecord]] = {}
     for rec in records:
-        grouped.setdefault(rec.model_family, {})[rec.limit_type] = rec
+        bucket = grouped.setdefault(rec.model_family, {})
+        existing = bucket.get(rec.limit_type)
+        if existing is None:
+            bucket[rec.limit_type] = rec
+            continue
+        merged_reset = (
+            max(_ensure_utc(existing.reset_at), _ensure_utc(rec.reset_at))
+            if existing.reset_at is not None and rec.reset_at is not None
+            else _ensure_utc(existing.reset_at)
+            if existing.reset_at is not None
+            else (_ensure_utc(rec.reset_at) if rec.reset_at is not None else None)
+        )
+        bucket[rec.limit_type] = QuotaSnapshotRecord(
+            model_family=rec.model_family,
+            limit_type=rec.limit_type,
+            remaining_pct=min(existing.remaining_pct, rec.remaining_pct),
+            reset_at=merged_reset,
+            recorded_at=max(_ensure_utc(existing.recorded_at), _ensure_utc(rec.recorded_at)),
+            raw_line=f"{existing.raw_line} | {rec.raw_line}",
+        )
 
     models: dict[str, ModelQuota] = {}
     for family, windows in grouped.items():
         five_hour = windows.get("five_hour")
         weekly = windows.get("weekly")
         rolling_pct = five_hour.remaining_pct if five_hour is not None else 100.0
-        rolling_reset = five_hour.reset_at if five_hour is not None else None
+        rolling_reset = _ensure_utc(five_hour.reset_at) if five_hour is not None else None
         weekly_pct = weekly.remaining_pct if weekly is not None else None
-        weekly_reset = weekly.reset_at if weekly is not None else None
+        weekly_reset = (
+            _ensure_utc(weekly.reset_at) if weekly is not None and weekly.reset_at else None
+        )
 
         lock_details = get_shared_model_lock_details(family)
         is_locked = lock_details is not None
         locked_reason = lock_details["reason"] if lock_details is not None else None
         if lock_details is not None and (
-            rolling_reset is None or lock_details["locked_until"] > rolling_reset
+            rolling_reset is None or _ensure_utc(lock_details["locked_until"]) > rolling_reset
         ):
-            rolling_reset = lock_details["locked_until"]
+            rolling_reset = _ensure_utc(lock_details["locked_until"])
 
         models[family] = ModelQuota(
             model_name=family,
@@ -332,6 +353,28 @@ def _build_models_from_records(
         )
 
     return models
+
+
+def _build_shared_lock_quota(
+    model_name: str,
+    group: str,
+    lock_details: dict[str, Any],
+) -> ModelQuota:
+    reason = str(lock_details["reason"])
+    is_weekly = reason in {"WEEKLY_LOCKOUT", "CREDIT_CAP_REACHED"}
+    locked_until = _ensure_utc(lock_details["locked_until"])
+    return ModelQuota(
+        model_name=model_name,
+        quota_group=group,
+        rolling_window_remaining_pct=0.0,
+        rolling_reset_epoch=None if is_weekly else locked_until,
+        weekly_remaining_pct=0.0 if is_weekly else None,
+        weekly_reset_epoch=locked_until if is_weekly else None,
+        is_locked_out=True,
+        locked_by_reason=reason,
+        is_weekly_depleted=is_weekly,
+        is_rolling_depleted=not is_weekly,
+    )
 
 
 class QuotaProvider(ABC):
@@ -394,18 +437,7 @@ class AgyCliProvider(QuotaProvider):
         if respect_shared_lock:
             lock_details = get_shared_model_lock_details(group)
             if lock_details is not None:
-                return ModelQuota(
-                    model_name=model_name,
-                    quota_group=group,
-                    rolling_window_remaining_pct=0.0,
-                    rolling_reset_epoch=lock_details["locked_until"],
-                    weekly_remaining_pct=None,
-                    weekly_reset_epoch=None,
-                    is_locked_out=True,
-                    locked_by_reason=lock_details["reason"],
-                    is_weekly_depleted=False,
-                    is_rolling_depleted=True,
-                )
+                return _build_shared_lock_quota(model_name, group, lock_details)
 
         snapshot = self.get_snapshot(
             rolling_threshold=rolling_threshold,
@@ -570,18 +602,7 @@ class MockProvider(QuotaProvider):
         if respect_shared_lock:
             lock_details = get_shared_model_lock_details(group)
             if lock_details is not None:
-                return ModelQuota(
-                    model_name=model_name,
-                    quota_group=group,
-                    rolling_window_remaining_pct=0.0,
-                    rolling_reset_epoch=lock_details["locked_until"],
-                    weekly_remaining_pct=None,
-                    weekly_reset_epoch=None,
-                    is_locked_out=True,
-                    locked_by_reason=lock_details["reason"],
-                    is_weekly_depleted=False,
-                    is_rolling_depleted=True,
-                )
+                return _build_shared_lock_quota(model_name, group, lock_details)
 
         snapshot = self.get_snapshot(
             rolling_threshold=rolling_threshold,

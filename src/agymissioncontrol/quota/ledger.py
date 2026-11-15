@@ -170,7 +170,7 @@ def get_quota_history(
                 SELECT timestamp, model_family, limit_type, remaining_pct, reset_at, raw_line
                 FROM quota_snapshots
                 WHERE model_family IN (?, ?)
-                ORDER BY timestamp DESC, id DESC
+                ORDER BY datetime(timestamp) DESC, id DESC
                 LIMIT ?
                 """,
                 (model_family, canonical, limit),
@@ -180,7 +180,7 @@ def get_quota_history(
                 """
                 SELECT timestamp, model_family, limit_type, remaining_pct, reset_at, raw_line
                 FROM quota_snapshots
-                ORDER BY timestamp DESC, id DESC
+                ORDER BY datetime(timestamp) DESC, id DESC
                 LIMIT ?
                 """,
                 (limit,),

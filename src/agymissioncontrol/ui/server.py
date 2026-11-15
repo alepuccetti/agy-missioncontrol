@@ -147,7 +147,7 @@ def build_quota_status_payload() -> dict[str, Any]:
             """
             SELECT timestamp, model_family, limit_type, remaining_pct, reset_at
             FROM quota_snapshots
-            ORDER BY timestamp DESC, id DESC
+            ORDER BY datetime(timestamp) DESC, id DESC
             """
         ).fetchall()
     finally:

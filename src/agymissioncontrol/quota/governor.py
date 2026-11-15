@@ -18,7 +18,7 @@ from rich.console import Console
 from rich.progress import BarColumn, Progress, TextColumn, TimeRemainingColumn
 
 from agymissioncontrol.config import CreditConfig, CreditPolicy, CreditTrigger
-from agymissioncontrol.quota.ledger import get_credit_spend
+from agymissioncontrol.quota.ledger import get_credit_spend, get_session_token_totals
 from agymissioncontrol.quota.locks import (
     clear_shared_model_lock,
     get_shared_model_lock_details,
@@ -82,6 +82,12 @@ def evaluate_gate_decision(
                 credit_cfg.policy == CreditPolicy.BUDGET_CAPPED
                 and current_credit_burn_usd >= credit_cfg.max_burn_usd
             ):
+                if credit_cfg.on_cap_reached == "halt":
+                    return (
+                        GateAction.LOCKOUT_CREDIT_BUDGET,
+                        f"5h rolling limit depleted; credit budget (${credit_cfg.max_burn_usd:.2f})"
+                        " exhausted (on_cap_reached=halt)",
+                    )
                 return (
                     GateAction.SLEEP_ROLLING,
                     "5h rolling limit depleted; credit budget cap reached, falling back to sleep",
@@ -96,6 +102,12 @@ def evaluate_gate_decision(
         )
 
     return GateAction.PROCEED_FREE, "Quota healthy"
+
+
+def _ensure_utc_dt(dt: datetime | None) -> datetime | None:
+    if dt is None:
+        return None
+    return dt.replace(tzinfo=UTC) if dt.tzinfo is None else dt.astimezone(UTC)
 
 
 def _format_utc_iso(dt: datetime) -> str:
@@ -135,18 +147,14 @@ def execute_sleep(
     wake_iso = _format_utc_iso(target_wake)
 
     wake_requested = False
+    interrupted = False
     is_main_thread = threading.current_thread() is threading.main_thread()
     previous_handlers: dict[int, Any] = {}
 
+    # Signal handlers must stay async-signal/reentrancy-safe (flags only; no Rich/stream I/O).
     def _interrupt_handler(_signum: int, _frame: Any) -> None:
-        if tty:
-            Console(file=stream, force_terminal=True, highlight=False).print(
-                "\n[yellow]Sleep cancelled by user. Exiting safely...[/yellow]"
-            )
-        else:
-            stream.write("\n[SLEEP CANCELLED] Interrupted by signal. Exiting safely.\n")
-            stream.flush()
-        sys.exit(130)
+        nonlocal interrupted
+        interrupted = True
 
     def _wake_handler(_signum: int, _frame: Any) -> None:
         nonlocal wake_requested
@@ -167,6 +175,7 @@ def execute_sleep(
     deadline_mono = start_mono + seconds
 
     try:
+        console: Console | None = None
         if tty:
             console = Console(file=stream, force_terminal=True, highlight=False)
             with Progress(
@@ -181,11 +190,11 @@ def execute_sleep(
             ) as progress:
                 task_id = progress.add_task(model_name, total=seconds)
                 elapsed = 0
-                while elapsed < seconds and not wake_requested:
+                while elapsed < seconds and not wake_requested and not interrupted:
                     if sleep_fn is time.sleep and time.monotonic() >= deadline_mono:
                         break
                     sleep_fn(1.0)
-                    if wake_requested:
+                    if wake_requested or interrupted:
                         break
                     if sleep_fn is time.sleep:
                         new_elapsed = min(seconds, math.floor(time.monotonic() - start_mono))
@@ -194,7 +203,13 @@ def execute_sleep(
                         delta = 1
                     elapsed = min(seconds, elapsed + delta)
                     progress.update(task_id, completed=elapsed)
-            console.print(f"[green]Quota window reset for {model_name} ({wake_iso}).[/green]")
+            if not interrupted:
+                if wake_requested:
+                    console.print(f"[cyan]Early wake signal received for {model_name}.[/cyan]")
+                else:
+                    console.print(
+                        f"[green]Quota window reset for {model_name} ({wake_iso}).[/green]"
+                    )
         else:
             stream.write(
                 f"[SLEEP] Model {model_name} quota exhausted. "
@@ -203,11 +218,11 @@ def execute_sleep(
             stream.flush()
             elapsed = 0
             last_heartbeat_bucket = 0
-            while elapsed < seconds and not wake_requested:
+            while elapsed < seconds and not wake_requested and not interrupted:
                 if sleep_fn is time.sleep and time.monotonic() >= deadline_mono:
                     break
                 sleep_fn(1.0)
-                if wake_requested:
+                if wake_requested or interrupted:
                     break
                 if sleep_fn is time.sleep:
                     elapsed = min(
@@ -227,11 +242,22 @@ def execute_sleep(
                     )
                     stream.flush()
 
-            if wake_requested:
-                stream.write(f"[SLEEP WAKE] Early wake signal received for {model_name}.\n")
+            if not interrupted:
+                if wake_requested:
+                    stream.write(f"[SLEEP WAKE] Early wake signal received for {model_name}.\n")
+                else:
+                    stream.write(
+                        f"[SLEEP WAKE] Quota window reset for {model_name} ({wake_iso}).\n"
+                    )
+                stream.flush()
+
+        if interrupted:
+            if console is not None:
+                console.print("\n[yellow]Sleep cancelled by user. Exiting safely...[/yellow]")
             else:
-                stream.write(f"[SLEEP WAKE] Quota window reset for {model_name} ({wake_iso}).\n")
-            stream.flush()
+                stream.write("\n[SLEEP CANCELLED] Interrupted by signal. Exiting safely.\n")
+                stream.flush()
+            sys.exit(130)
     finally:
         for sig, old_handler in previous_handlers.items():
             signal.signal(sig, old_handler)
@@ -254,10 +280,36 @@ def evaluate_and_gate(
     is_tty: bool | None = None,
     out_stream: TextIO | None = None,
     on_event: Callable[[str, dict[str, Any]], None] | None = None,
+    max_session_tokens: int | None = None,
 ) -> GateDecision:
     """Evaluate shared locks and live quota, then gate, sleep, or fail closed."""
     active_credit_cfg = credit_cfg or CreditConfig()
     current_burn = get_credit_spend(project_dir) if project_dir is not None else 0.0
+    if max_session_tokens is not None and project_dir is not None:
+        session_totals = get_session_token_totals(project_dir)
+        if session_totals.total_tokens >= max_session_tokens:
+            cap_reason = (
+                f"Session token ceiling reached ({session_totals.total_tokens:,} >= "
+                f"{max_session_tokens:,} tokens)"
+            )
+            _emit_event(
+                on_event,
+                "HARD_LOCKOUT",
+                {
+                    "model": model,
+                    "action": GateAction.LOCKOUT_CREDIT_BUDGET.value,
+                    "reason": cap_reason,
+                    "session_tokens": session_totals.total_tokens,
+                    "max_session_tokens": max_session_tokens,
+                    "source": "session_token_cap",
+                },
+            )
+            return GateDecision(
+                action=GateAction.LOCKOUT_CREDIT_BUDGET,
+                reason=cap_reason,
+                exit_code=2,
+                is_credit_funded=False,
+            )
 
     # Pre-flight shared model lock check before invoking external telemetry CLI
     lock_details = get_shared_model_lock_details(model)
@@ -307,6 +359,45 @@ def evaluate_and_gate(
                 reason="Shared 5h rolling lock bypassed via AI credits",
                 exit_code=0,
                 is_credit_funded=True,
+                reset_at=lock_until,
+            )
+        if (
+            allow_5h_credit
+            and active_credit_cfg.policy == CreditPolicy.BUDGET_CAPPED
+            and current_burn >= active_credit_cfg.max_burn_usd
+            and active_credit_cfg.on_cap_reached == "halt"
+        ):
+            cap_reason = (
+                f"Shared 5h rolling lock active; credit budget "
+                f"(${active_credit_cfg.max_burn_usd:.2f}) exhausted (on_cap_reached=halt)"
+            )
+            _emit_event(
+                on_event,
+                "CREDIT_BUDGET_EXCEEDED",
+                {
+                    "model": model,
+                    "reason": cap_reason,
+                    "current_burn_usd": current_burn,
+                    "max_burn_usd": active_credit_cfg.max_burn_usd,
+                    "reset_at": _format_utc_iso(lock_until),
+                },
+            )
+            _emit_event(
+                on_event,
+                "HARD_LOCKOUT",
+                {
+                    "model": model,
+                    "action": GateAction.LOCKOUT_CREDIT_BUDGET.value,
+                    "reason": cap_reason,
+                    "reset_at": _format_utc_iso(lock_until),
+                    "source": "shared_lock",
+                },
+            )
+            return GateDecision(
+                action=GateAction.LOCKOUT_CREDIT_BUDGET,
+                reason=cap_reason,
+                exit_code=2,
+                is_credit_funded=False,
                 reset_at=lock_until,
             )
 
@@ -411,7 +502,7 @@ def evaluate_and_gate(
         )
 
     if action in (GateAction.LOCKOUT_WEEKLY, GateAction.LOCKOUT_CREDIT_BUDGET):
-        reset_at = quota.weekly_reset_epoch or quota.rolling_reset_epoch
+        reset_at = _ensure_utc_dt(quota.weekly_reset_epoch or quota.rolling_reset_epoch)
         if reset_at is not None and reset_at > datetime.now(UTC):
             set_shared_model_lock(model, reset_at, reason="WEEKLY_LOCKOUT")
         reset_iso = _format_utc_iso(reset_at) if reset_at else None
@@ -448,7 +539,9 @@ def evaluate_and_gate(
         )
 
     # SLEEP_ROLLING branch
-    reset_at = quota.rolling_reset_epoch or (datetime.now(UTC) + timedelta(minutes=5))
+    reset_at = _ensure_utc_dt(quota.rolling_reset_epoch) or (
+        datetime.now(UTC) + timedelta(minutes=5)
+    )
     sleep_seconds = calculate_sleep_duration(reset_at, safety_buffer_seconds=safety_buffer_seconds)
     if sleep_seconds > 0:
         set_shared_model_lock(model, reset_at, reason="5H_ROLLING_EXHAUSTED")

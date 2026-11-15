@@ -355,6 +355,7 @@ def gate(
                 caller_bypass_5h=bypass_5h_quota,
                 project_dir=root,
                 on_event=_on_gate_event,
+                max_session_tokens=cfg.governor.max_session_tokens,
             )
             if decision.woken_early:
                 update_session_state(
