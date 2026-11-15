@@ -66,6 +66,11 @@ from agymissioncontrol.registry import (
     update_session_state,
     wake_target,
 )
+from agymissioncontrol.ui import (
+    run_dashboard_server,
+    spawn_detached_dashboard,
+    stop_detached_dashboard,
+)
 from agymissioncontrol.ui.display import build_status_payload, render_status_table
 
 app = typer.Typer(
@@ -806,6 +811,47 @@ def stop(
 
     pid_list = ", ".join(str(pid) for pid in stopped_pids)
     typer.echo(f"Sent SIGTERM to gate session(s): {pid_list}")
+
+
+@app.command()
+def dashboard(
+    port: Annotated[
+        int,
+        typer.Option("--port", min=1, max=65535, help="Localhost port for cockpit HTTP server."),
+    ] = 8484,
+    no_browser: Annotated[
+        bool,
+        typer.Option("--no-browser", help="Do not open the web browser automatically."),
+    ] = False,
+    detach: Annotated[
+        bool,
+        typer.Option("--detach", "-d", help="Run the dashboard server in the background."),
+    ] = False,
+    stop_server: Annotated[
+        bool,
+        typer.Option("--stop", help="Stop a running detached dashboard server via SIGTERM."),
+    ] = False,
+) -> None:
+    """Serve the live Quota Cockpit web dashboard locally on `127.0.0.1`."""
+    if stop_server:
+        stopped, _pid, message = stop_detached_dashboard()
+        typer.echo(message)
+        if not stopped and "invalid" in message.lower():
+            raise typer.Exit(code=1)
+        return
+
+    open_browser = not no_browser
+    if detach:
+        pid = spawn_detached_dashboard(port=port, open_browser=open_browser)
+        typer.echo(f"Quota Cockpit running at http://localhost:{port} (PID {pid})")
+        return
+
+    typer.echo(f"Serving Quota Cockpit at http://localhost:{port} (Press Ctrl+C to stop)")
+    try:
+        run_dashboard_server(port=port, open_browser=open_browser)
+    except OSError as exc:
+        typer.echo(f"Error starting dashboard server on port {port}: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
 
 
 if __name__ == "__main__":
