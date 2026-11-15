@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "agymissioncontrol"
 version = "0.1.0"
-description = "Autonomous task orchestrator, quota governor, and issue-to-spec compiler for Google Antigravity"
+description = "Authoritative quota governor, zero-token sleep controller, and live quota cockpit for Google Antigravity"
 readme = "README.md"
 requires-python = ">=3.15"
 license = "MIT"

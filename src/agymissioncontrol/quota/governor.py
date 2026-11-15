@@ -102,6 +102,16 @@ def _format_utc_iso(dt: datetime) -> str:
     return utc_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def _emit_event(
+    on_event: Callable[[str, dict[str, Any]], None] | None,
+    event_type: str,
+    payload: dict[str, Any],
+) -> None:
+    """Invoke optional governor event callback cleanly when configured."""
+    if on_event is not None:
+        on_event(event_type, payload)
+
+
 def execute_sleep(
     seconds: int,
     model_name: str,
@@ -242,6 +252,7 @@ def evaluate_and_gate(
     sleep_fn: Callable[[float], None] = time.sleep,
     is_tty: bool | None = None,
     out_stream: TextIO | None = None,
+    on_event: Callable[[str, dict[str, Any]], None] | None = None,
 ) -> GateDecision:
     """Evaluate shared locks and live quota, then gate, sleep, or fail closed."""
     active_credit_cfg = credit_cfg or CreditConfig()
@@ -268,9 +279,22 @@ def evaluate_and_gate(
                     is_credit_funded=True,
                     reset_at=lock_until,
                 )
+            lockout_reason = (
+                f"Shared weekly pool lockout active until {_format_utc_iso(lock_until)}"
+            )
+            _emit_event(
+                on_event,
+                "HARD_LOCKOUT",
+                {
+                    "model": model,
+                    "reason": lockout_reason,
+                    "reset_at": _format_utc_iso(lock_until),
+                    "source": "shared_lock",
+                },
+            )
             return GateDecision(
                 action=GateAction.LOCKOUT_WEEKLY,
-                reason=f"Shared weekly pool lockout active until {_format_utc_iso(lock_until)}",
+                reason=lockout_reason,
                 exit_code=2,
                 is_credit_funded=False,
                 reset_at=lock_until,
@@ -308,6 +332,16 @@ def evaluate_and_gate(
                 reset_at=lock_until,
             )
 
+        _emit_event(
+            on_event,
+            "SLEEP_ENTERED",
+            {
+                "model": model,
+                "sleep_seconds": sleep_seconds,
+                "wakes_at": _format_utc_iso(lock_until),
+                "source": "shared_lock",
+            },
+        )
         execute_sleep(
             sleep_seconds,
             model,
@@ -364,6 +398,30 @@ def evaluate_and_gate(
         reset_at = quota.weekly_reset_epoch or quota.rolling_reset_epoch
         if reset_at is not None and reset_at > datetime.now(UTC):
             set_shared_model_lock(model, reset_at, reason="WEEKLY_LOCKOUT")
+        reset_iso = _format_utc_iso(reset_at) if reset_at else None
+        if action == GateAction.LOCKOUT_CREDIT_BUDGET:
+            _emit_event(
+                on_event,
+                "CREDIT_BUDGET_EXCEEDED",
+                {
+                    "model": model,
+                    "reason": reason,
+                    "current_burn_usd": current_burn,
+                    "max_burn_usd": active_credit_cfg.max_burn_usd,
+                    "reset_at": reset_iso,
+                },
+            )
+        _emit_event(
+            on_event,
+            "HARD_LOCKOUT",
+            {
+                "model": model,
+                "action": action.value,
+                "reason": reason,
+                "reset_at": reset_iso,
+                "source": "provider",
+            },
+        )
         return GateDecision(
             action=action,
             reason=reason,
@@ -401,6 +459,16 @@ def evaluate_and_gate(
             model_quota=quota,
         )
 
+    _emit_event(
+        on_event,
+        "SLEEP_ENTERED",
+        {
+            "model": model,
+            "sleep_seconds": sleep_seconds,
+            "wakes_at": _format_utc_iso(reset_at),
+            "source": "provider",
+        },
+    )
     execute_sleep(
         sleep_seconds,
         model,
