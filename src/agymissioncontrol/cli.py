@@ -41,7 +41,7 @@ from agymissioncontrol.ui.display import build_status_payload, render_status_tab
 
 app = typer.Typer(
     name="agymissioncontrol",
-    help="Autonomous task orchestrator, quota governor, and issue-to-spec compiler for agy.",
+    help="Quota governor, zero-token sleep controller, and live quota cockpit for agy.",
     no_args_is_help=True,
 )
 

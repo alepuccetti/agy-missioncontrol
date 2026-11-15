@@ -1,4 +1,4 @@
 {
   "name": "agymissioncontrol",
-  "description": "Autonomous task orchestrator, quota governor, and issue-to-spec compiler for Google Antigravity"
+  "description": "Authoritative quota governor, zero-token sleep controller, and live quota cockpit for Google Antigravity"
 }
