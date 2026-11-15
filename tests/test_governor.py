@@ -16,9 +16,11 @@ from agymissioncontrol.quota import (
     MockProvider,
     UsageTelemetry,
     check_shared_model_lock,
+    clear_shared_model_lock,
     evaluate_and_gate,
     evaluate_gate_decision,
     execute_sleep,
+    get_shared_model_lock_details,
     record_token_transaction,
     set_shared_model_lock,
 )
@@ -346,3 +348,175 @@ def test_evaluate_and_gate_max_sleep_and_ledger_budget_cap(
     )
     assert lockout_decision.exit_code == 2
     assert lockout_decision.action == GateAction.LOCKOUT_CREDIT_BUDGET
+
+
+def test_shared_lock_monotonicity_and_conditional_clear(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("AGY_MC_STATE_DIR", str(tmp_path / "state"))
+    now = datetime.now(UTC)
+    rolling_until = now + timedelta(minutes=15)
+    weekly_until = now + timedelta(days=4)
+
+    set_shared_model_lock("claude-opus", weekly_until, reason="WEEKLY_LOCKOUT")
+    # Shorter rolling lock must NOT overwrite active longer weekly lockout
+    set_shared_model_lock("claude-sonnet-4-6", rolling_until, reason="5H_ROLLING_EXHAUSTED")
+
+    details = get_shared_model_lock_details("claude-3-7-sonnet")
+    assert details is not None
+    assert details["reason"] == "WEEKLY_LOCKOUT"
+    assert details["locked_until"] == weekly_until
+
+    # Waking from rolling window must NOT clear newer weekly lockout
+    clear_shared_model_lock("claude-3-7-sonnet", max_locked_until=rolling_until)
+    still_locked = get_shared_model_lock_details("claude-3-7-sonnet")
+    assert still_locked is not None
+    assert still_locked["reason"] == "WEEKLY_LOCKOUT"
+
+    clear_shared_model_lock("claude-3-7-sonnet", max_locked_until=weekly_until)
+    assert check_shared_model_lock("claude-3-7-sonnet") is None
+
+
+def test_on_cap_reached_halt_and_max_session_tokens(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("AGY_MC_STATE_DIR", str(tmp_path / "state"))
+    proj_dir = tmp_path / "proj"
+    proj_dir.mkdir()
+
+    # 1. Evaluate gate decision honors on_cap_reached="halt" vs "sleep"
+    halt_cfg = CreditConfig(
+        policy=CreditPolicy.BUDGET_CAPPED,
+        max_burn_usd=5.0,
+        trigger=CreditTrigger.ANY,
+        on_cap_reached="halt",
+    )
+    action, _ = evaluate_gate_decision(
+        rolling_quota_pct=5.0,
+        rolling_threshold=15.0,
+        weekly_quota_pct=80.0,
+        weekly_threshold=10.0,
+        credit_cfg=halt_cfg,
+        current_credit_burn_usd=5.0,
+    )
+    assert action == GateAction.LOCKOUT_CREDIT_BUDGET
+
+    # Record credit spend meeting max_burn_usd and confirm evaluate_and_gate halts (exit 2)
+    record_token_transaction(
+        proj_dir,
+        task_id="E05-T02-BURN",
+        model="claude-3-7-sonnet",
+        usage=UsageTelemetry(
+            work_tokens=200,
+            overhead_tokens=50,
+            is_credit_funded=True,
+            credit_burn_usd=5.0,
+        ),
+    )
+    reset_5h = (datetime.now(UTC) + timedelta(minutes=20)).isoformat()
+    provider = MockProvider(
+        models_payload={
+            "Claude and GPT models": {
+                "five_hour": {"remaining_pct": 5.0, "reset_at": reset_5h},
+                "weekly": {"remaining_pct": 80.0, "reset_at": reset_5h},
+            }
+        }
+    )
+    halt_decision = evaluate_and_gate(
+        model="claude-3-7-sonnet",
+        provider=provider,
+        credit_cfg=halt_cfg,
+        project_dir=proj_dir,
+        auto_sleep=True,
+    )
+    assert halt_decision.action == GateAction.LOCKOUT_CREDIT_BUDGET
+    assert halt_decision.exit_code == 2
+
+    # 2. Enforce max_session_tokens even when quota itself is healthy
+    clear_shared_model_lock("claude-3-7-sonnet")
+    record_token_transaction(
+        proj_dir,
+        task_id="E05-T02-CAP",
+        model="claude-3-7-sonnet",
+        usage=UsageTelemetry(work_tokens=400, overhead_tokens=100),
+    )
+    healthy_provider = MockProvider()
+    events: list[tuple[str, dict[str, object]]] = []
+    cap_decision = evaluate_and_gate(
+        model="claude-3-7-sonnet",
+        provider=healthy_provider,
+        credit_cfg=CreditConfig(),
+        project_dir=proj_dir,
+        max_session_tokens=700,
+        on_event=lambda name, payload: events.append((name, payload)),
+    )
+    assert cap_decision.action == GateAction.LOCKOUT_CREDIT_BUDGET
+    assert cap_decision.exit_code == 2
+    assert events and events[0][0] == "HARD_LOCKOUT"
+    assert events[0][1]["source"] == "session_token_cap"
+
+
+def test_naive_weekly_reset_epoch_and_tty_sigint_main_thread(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from agymissioncontrol.quota import ModelQuota, QuotaProvider, QuotaSnapshot
+
+    monkeypatch.setenv("AGY_MC_STATE_DIR", str(tmp_path / "state"))
+
+    class _NaiveProvider(QuotaProvider):
+        def get_snapshot(
+            self,
+            rolling_threshold: float = 15.0,
+            weekly_threshold: float = 10.0,
+        ) -> QuotaSnapshot:
+            return QuotaSnapshot()
+
+        def get_model_quota(
+            self,
+            model_name: str,
+            rolling_threshold: float = 15.0,
+            weekly_threshold: float = 10.0,
+            respect_shared_lock: bool = True,
+        ) -> ModelQuota:
+            # Intentionally return a naive datetime (no tzinfo)
+            return ModelQuota(
+                model_name=model_name,
+                quota_group="Claude and GPT models",
+                rolling_window_remaining_pct=50.0,
+                weekly_remaining_pct=0.0,
+                weekly_reset_epoch=datetime(2099, 1, 1, 0, 0, 0),
+                is_weekly_depleted=True,
+                is_rolling_depleted=False,
+            )
+
+    decision = evaluate_and_gate(
+        model="claude-3-7-sonnet",
+        provider=_NaiveProvider(),
+        credit_cfg=CreditConfig(policy=CreditPolicy.NEVER),
+    )
+    assert decision.action == GateAction.LOCKOUT_WEEKLY
+    assert decision.exit_code == 2
+    assert decision.reset_at is not None
+    assert decision.reset_at.tzinfo == UTC
+    lock_details = get_shared_model_lock_details("claude-3-7-sonnet")
+    assert lock_details is not None
+    assert lock_details["reason"] == "WEEKLY_LOCKOUT"
+
+    # TTY SIGINT during execute_sleep should exit 130 cleanly after Progress exits
+    tty_stream = io.StringIO()
+
+    def _interrupt_after_one_tick(_dt: float) -> None:
+        os.kill(os.getpid(), signal.SIGINT)
+
+    with pytest.raises(SystemExit) as exc_info:
+        execute_sleep(
+            seconds=10,
+            model_name="claude-3-7-sonnet",
+            sleep_fn=_interrupt_after_one_tick,
+            is_tty=True,
+            out_stream=tty_stream,
+        )
+    assert exc_info.value.code == 130
+    rendered = tty_stream.getvalue()
+    assert "Sleep cancelled by user" in rendered
+    assert "Quota window reset" not in rendered

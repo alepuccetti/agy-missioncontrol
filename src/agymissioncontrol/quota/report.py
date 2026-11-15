@@ -12,7 +12,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from agymissioncontrol.config import AppConfig, resolve_project_paths
+from agymissioncontrol.config import AppConfig, atomic_write_text, resolve_project_paths
 from agymissioncontrol.quota.ledger import (
     get_credit_spend,
     get_db,
@@ -340,15 +340,16 @@ def render_report_json(report: QuotaReport) -> str:
 def write_quota_report(
     report: QuotaReport,
     reports_dir: Path,
-    fmt: Literal["rich", "md", "json"] = "md",
+    fmt: Literal["rich", "md", "json"] | str = "md",
 ) -> Path:
-    """Persist Markdown or JSON report under `.agymissioncontrol/reports/`."""
+    """Persist Markdown or JSON report atomically under `.agymissioncontrol/reports/`."""
     reports_dir.mkdir(parents=True, exist_ok=True)
-    stamp = report.generated_at.astimezone(UTC).strftime("%Y%m%d_%H%M%S")
-    if fmt == "json":
-        path = reports_dir / f"quota_report_{stamp}.json"
-        path.write_text(render_report_json(report) + "\n", encoding="utf-8")
-    else:
-        path = reports_dir / f"quota_report_{stamp}.md"
-        path.write_text(render_report_markdown(report), encoding="utf-8")
-    return path
+    stamp = report.generated_at.astimezone(UTC).strftime("%Y%m%d_%H%M%S_%f")
+    ext = "json" if fmt == "json" else "md"
+    candidate = reports_dir / f"quota_report_{stamp}.{ext}"
+    suffix = 1
+    while candidate.exists():
+        candidate = reports_dir / f"quota_report_{stamp}_{suffix}.{ext}"
+        suffix += 1
+    content = render_report_json(report) + "\n" if ext == "json" else render_report_markdown(report)
+    return atomic_write_text(candidate, content, encoding="utf-8")

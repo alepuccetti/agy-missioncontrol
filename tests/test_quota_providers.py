@@ -357,3 +357,64 @@ def test_mock_provider_simulation(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     quota = provider.get_model_quota("claude-3-7-sonnet", rolling_threshold=15.0)
     assert quota.rolling_window_remaining_pct == 10.0
     assert quota.is_rolling_depleted is True
+
+
+def test_multi_group_subpool_merge_and_weekly_lock_flags(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("AGY_MC_STATE_DIR", str(tmp_path / "state"))
+    assert resolve_quota_group("gemini-pro-orchestrator-g1-pro") == "Gemini 4 Argon"
+
+    reset_earlier = datetime.now(UTC) + timedelta(hours=1)
+    reset_later = datetime.now(UTC) + timedelta(hours=4)
+
+    def _multi_subpool_fetcher() -> dict[str, object]:
+        return {
+            "command": {
+                "data": {
+                    "groups": [
+                        {
+                            "name": "Gemini 3 Pro",
+                            "buckets": [
+                                {
+                                    "name": "5-Hour Limit",
+                                    "window": "5h",
+                                    "remaining_fraction": 0.0,
+                                    "reset_time": reset_later.isoformat(),
+                                }
+                            ],
+                        },
+                        {
+                            "name": "Gemini 3 Flash",
+                            "buckets": [
+                                {
+                                    "name": "5-Hour Limit",
+                                    "window": "5h",
+                                    "remaining_fraction": 0.95,
+                                    "reset_time": reset_earlier.isoformat(),
+                                }
+                            ],
+                        },
+                    ]
+                }
+            }
+        }
+
+    cli_provider = AgyCliProvider(fetcher=_multi_subpool_fetcher)
+    snapshot = cli_provider.get_snapshot(rolling_threshold=15.0)
+    gemini_q = snapshot.models["Gemini Models"]
+    assert gemini_q.rolling_window_remaining_pct == 0.0
+    assert gemini_q.rolling_reset_epoch == reset_later
+    assert gemini_q.is_rolling_depleted is True
+
+    # WEEKLY_LOCKOUT shared lock derives is_weekly_depleted=True, is_rolling_depleted=False
+    weekly_until = datetime.now(UTC) + timedelta(days=5)
+    set_shared_model_lock("claude-opus", weekly_until, reason="WEEKLY_LOCKOUT")
+
+    for provider in (cli_provider, MockProvider()):
+        locked = provider.get_model_quota("claude-3-7-sonnet", respect_shared_lock=True)
+        assert locked.is_locked_out is True
+        assert locked.locked_by_reason == "WEEKLY_LOCKOUT"
+        assert locked.is_weekly_depleted is True
+        assert locked.is_rolling_depleted is False
+        assert locked.weekly_reset_epoch == weekly_until

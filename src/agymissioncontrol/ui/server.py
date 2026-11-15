@@ -9,6 +9,7 @@ import signal
 import subprocess
 import sys
 import threading
+import time
 import webbrowser
 from datetime import UTC, datetime
 from http import HTTPStatus
@@ -17,6 +18,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlsplit
 
+from agymissioncontrol.config import atomic_write_text
 from agymissioncontrol.quota.ledger import get_quota_history
 from agymissioncontrol.quota.locks import (
     clear_shared_model_lock,
@@ -24,6 +26,7 @@ from agymissioncontrol.quota.locks import (
     resolve_quota_group,
 )
 from agymissioncontrol.registry import (
+    ensure_registry_schema,
     get_registry_db,
     get_state_dir,
     init_registry,
@@ -94,7 +97,7 @@ def stop_detached_dashboard() -> tuple[bool, int | None, str]:
 
     try:
         os.kill(pid, signal.SIGTERM)
-    except ProcessLookupError:
+    except ProcessLookupError, PermissionError:
         pid_path.unlink(missing_ok=True)
         return False, pid, f"Removed stale dashboard.pid for inactive PID {pid}."
 
@@ -125,7 +128,16 @@ def spawn_detached_dashboard(port: int = 8484, open_browser: bool = True) -> int
         stderr=subprocess.DEVNULL,
         close_fds=True,
     )
-    get_dashboard_pid_path().write_text(f"{proc.pid}\n", encoding="utf-8")
+    poll_fn = getattr(proc, "poll", None)
+    if callable(poll_fn):
+        time.sleep(0.1)
+        exit_code = poll_fn()
+        if exit_code is not None:
+            raise RuntimeError(
+                f"Detached dashboard process exited immediately with code {exit_code} "
+                f"(port {port} may already be in use)."
+            )
+    atomic_write_text(get_dashboard_pid_path(), f"{proc.pid}\n", encoding="utf-8")
     if open_browser:
         webbrowser.open(f"http://localhost:{port}")
     return proc.pid
@@ -140,14 +152,14 @@ def _classify_limit_type(limit_type: str) -> str:
 
 def build_quota_status_payload() -> dict[str, Any]:
     """Build latest per-pool quota availability and lock status from `registry.db`."""
-    init_registry()
     conn = get_registry_db()
     try:
+        ensure_registry_schema(conn)
         rows = conn.execute(
             """
             SELECT timestamp, model_family, limit_type, remaining_pct, reset_at
             FROM quota_snapshots
-            ORDER BY timestamp DESC, id DESC
+            ORDER BY datetime(timestamp) DESC, id DESC
             """
         ).fetchall()
     finally:
@@ -422,7 +434,7 @@ def run_dashboard_server(port: int = 8484, open_browser: bool = True) -> None:
     server = create_dashboard_server(port=port)
     actual_port = server.server_address[1]
     current_pid = os.getpid()
-    get_dashboard_pid_path().write_text(f"{current_pid}\n", encoding="utf-8")
+    atomic_write_text(get_dashboard_pid_path(), f"{current_pid}\n", encoding="utf-8")
 
     stop_requested = threading.Event()
     prev_int = None

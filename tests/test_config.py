@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+import yaml
 from pydantic import ValidationError
 
 from agymissioncontrol.config import (
@@ -68,25 +69,26 @@ def test_load_config_safe_defaults_without_yaml(
         "AGY_DEFAULT_MODEL",
         "AGY_THRESHOLD_PERCENT",
         "AGY_WEEKLY_THRESHOLD_PERCENT",
+        "AGY_SAFETY_BUFFER_SECONDS",
+        "AGY_MAX_SLEEP_SECONDS",
+        "AGY_MAX_SESSION_TOKENS",
         "AGY_CREDIT_POLICY",
         "AGY_MAX_CREDIT_BURN",
         "AGY_CREDIT_TRIGGER",
+        "AGY_CREDIT_ON_CAP_REACHED",
         "AGY_BYPASS_5H_QUOTA",
     ):
         monkeypatch.delenv(var, raising=False)
 
     cfg = load_config(project_dir=tmp_path)
     assert isinstance(cfg, AppConfig)
-    assert cfg.models.default_model == "claude-3-7-sonnet"
-    assert cfg.governor.threshold_percent == 15.0
-    assert cfg.governor.weekly_threshold_percent == 10.0
-    assert cfg.governor.safety_buffer_seconds == 60
-    assert cfg.governor.credits.policy == CreditPolicy.NEVER
-    assert cfg.governor.credits.max_burn_usd == 0.00
-    assert cfg.governor.credits.trigger == CreditTrigger.WEEKLY_ONLY
-    assert cfg.governor.credits.on_cap_reached == "sleep"
     assert cfg.paths is not None
+    assert cfg.paths.project_root == tmp_path.resolve()
+    assert cfg.paths.manifest_path == tmp_path.resolve() / "TASKS.md"
     assert cfg.paths.db_path == tmp_path.resolve() / ".agymissioncontrol" / "missioncontrol.db"
+    assert cfg.paths.logs_dir == tmp_path.resolve() / ".agymissioncontrol" / "logs"
+    assert cfg.paths.reports_dir == tmp_path.resolve() / ".agymissioncontrol" / "reports"
+    assert not (tmp_path / ".gitignore").exists()
 
 
 def test_load_config_precedence_cli_over_env_over_yaml(
@@ -156,3 +158,43 @@ def test_credit_config_validation_rejects_invalid_values() -> None:
 
     with pytest.raises(ValidationError):
         CreditConfig.model_validate({"on_cap_reached": "panic"})
+
+
+def test_load_config_malformed_yaml_missing_path_and_invalid_env_vars(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Missing explicit config_path falls back cleanly while anchoring project_root to its parent
+    nested = tmp_path / "subdir"
+    nested.mkdir()
+    missing_cfg = nested / "nonexistent.yaml"
+    cfg_missing = load_config(config_path=missing_cfg)
+    assert cfg_missing.paths is not None
+    assert cfg_missing.paths.project_root == nested.resolve()
+
+    # Non-mapping YAML root raises ValueError
+    list_yaml = tmp_path / "list.yaml"
+    list_yaml.write_text("- item1\n- item2\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="Expected mapping"):
+        load_config(config_path=list_yaml)
+
+    # Malformed YAML syntax propagates yaml.YAMLError
+    bad_yaml = tmp_path / "broken.yaml"
+    bad_yaml.write_text("governor: [unclosed\n", encoding="utf-8")
+    with pytest.raises(yaml.YAMLError):
+        load_config(config_path=bad_yaml)
+
+    # Invalid numeric env overrides raise Pydantic ValidationError uniformly (QW-03)
+    monkeypatch.setenv("AGY_THRESHOLD_PERCENT", "not-a-float")
+    with pytest.raises(ValidationError):
+        load_config(project_dir=tmp_path)
+    monkeypatch.delenv("AGY_THRESHOLD_PERCENT")
+
+    monkeypatch.setenv("AGY_MAX_SLEEP_SECONDS", "abc")
+    with pytest.raises(ValidationError):
+        load_config(project_dir=tmp_path)
+    monkeypatch.delenv("AGY_MAX_SLEEP_SECONDS")
+
+    monkeypatch.setenv("AGY_MAX_SESSION_TOKENS", "0")
+    with pytest.raises(ValidationError):
+        load_config(project_dir=tmp_path)

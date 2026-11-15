@@ -262,3 +262,136 @@ def test_concurrent_threaded_registrations_no_lock_errors(isolated_registry: Pat
     finally:
         conn.close()
     assert count == 16
+
+
+def test_pid_reuse_updated_at_and_permission_error_safety(isolated_registry: Path) -> None:
+    """Signal helpers handle `PermissionError` and dead-PID pruning guards `updated_at`."""
+    t_old = datetime.now(UTC) - timedelta(minutes=5)
+    t_new = datetime.now(UTC)
+    reused_pid = 52001
+
+    register_session(
+        SessionState(
+            pid=reused_pid,
+            project_name="old-proc",
+            project_dir="/tmp/old-proc",
+            label="stale",
+            model="claude-sonnet-4-6",
+            quota_group="Claude and GPT models",
+            state=SessionStatus.SLEEPING,
+            wakes_at=t_new + timedelta(minutes=10),
+            updated_at=t_old,
+        )
+    )
+
+    with patch(
+        "agymissioncontrol.registry.manager.os.kill",
+        side_effect=PermissionError(1, "Operation not permitted"),
+    ):
+        assert wake_session(reused_pid) is False
+
+    assert list_active_sessions() == []
+
+    register_session(
+        SessionState(
+            pid=reused_pid,
+            project_name="old-proc-2",
+            project_dir="/tmp/old-proc-2",
+            label="stale-2",
+            model="claude-sonnet-4-6",
+            quota_group="Claude and GPT models",
+            state=SessionStatus.ACTIVE,
+            updated_at=t_old,
+        )
+    )
+    with patch(
+        "agymissioncontrol.registry.manager.os.kill",
+        side_effect=PermissionError(1, "Operation not permitted"),
+    ):
+        assert stop_session(reused_pid) is False
+
+    assert list_active_sessions() == []
+
+    # Simulate PID row being re-registered with newer `updated_at` while reader checks liveness.
+    register_session(
+        SessionState(
+            pid=reused_pid,
+            project_name="old-snap",
+            project_dir="/tmp/old-snap",
+            model="claude-sonnet-4-6",
+            quota_group="Claude and GPT models",
+            state=SessionStatus.ACTIVE,
+            updated_at=t_old,
+        )
+    )
+
+    def fake_is_alive_with_concurrent_reregister(pid: int) -> bool:
+        if pid == reused_pid:
+            # Overwrite row directly via separate connection with newer timestamp.
+            conn = get_registry_db()
+            try:
+                with conn:
+                    conn.execute(
+                        "UPDATE sessions SET project_name = ?, updated_at = ? WHERE pid = ?;",
+                        ("new-live-proc", t_new.isoformat(), reused_pid),
+                    )
+            finally:
+                conn.close()
+        return False
+
+    with patch(
+        "agymissioncontrol.registry.manager.is_pid_alive",
+        side_effect=fake_is_alive_with_concurrent_reregister,
+    ):
+        assert list_active_sessions() == []
+
+    with patch("agymissioncontrol.registry.manager.is_pid_alive", return_value=True):
+        surviving = list_active_sessions()
+    assert len(surviving) == 1
+    assert surviving[0].project_name == "new-live-proc"
+
+
+def test_read_paths_skip_write_ddl_when_schema_initialized(isolated_registry: Path) -> None:
+    """Read helpers do not acquire write locks or overwrite user_version once initialized."""
+    from agymissioncontrol.quota.ledger import get_quota_history
+    from agymissioncontrol.quota.locks import (
+        get_shared_model_lock_details,
+        list_shared_model_locks,
+    )
+
+    init_registry()
+    writer = get_registry_db()
+    try:
+        with writer:
+            writer.execute("PRAGMA user_version = 7;")
+
+        # Hold a WAL write lock; pure read paths must succeed without DDL write locks.
+        writer.execute("BEGIN IMMEDIATE;")
+        try:
+            assert list_active_sessions(prune_dead=False) == []
+            assert get_shared_model_lock_details("claude-3-7-sonnet") is None
+            assert list_shared_model_locks() == []
+            assert get_quota_history(limit=5) == []
+            version_after = writer.execute("PRAGMA user_version;").fetchone()[0]
+            assert version_after == 7
+        finally:
+            writer.rollback()
+    finally:
+        writer.close()
+
+    # Corrupt session row must be skipped without crashing `list_active_sessions` (QW-07)
+    conn = get_registry_db()
+    try:
+        with conn:
+            conn.execute(
+                """
+                INSERT INTO sessions (
+                    pid, project_name, project_dir, label, model, quota_group, state
+                ) VALUES (?, ?, ?, ?, ?, ?, ?);
+                """,
+                (os.getpid(), "corrupt", "/tmp/corrupt", "bad", "claude", "Claude", "BAD_STATE"),
+            )
+    finally:
+        conn.close()
+
+    assert list_active_sessions(prune_dead=False) == []

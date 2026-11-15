@@ -19,6 +19,7 @@ import agymissioncontrol
 from agymissioncontrol.config import (
     CreditPolicy,
     CreditTrigger,
+    atomic_write_text,
     ensure_gitignore_guard,
     load_config,
 )
@@ -355,6 +356,7 @@ def gate(
                 caller_bypass_5h=bypass_5h_quota,
                 project_dir=root,
                 on_event=_on_gate_event,
+                max_session_tokens=cfg.governor.max_session_tokens,
             )
             if decision.woken_early:
                 update_session_state(
@@ -551,8 +553,7 @@ def plan(
         typer.echo(rendered_manifest, nl=False)
         return
 
-    target_path.parent.mkdir(parents=True, exist_ok=True)
-    target_path.write_text(rendered_manifest, encoding="utf-8")
+    atomic_write_text(target_path, rendered_manifest, encoding="utf-8")
     typer.echo(f"Wrote {len(ordered_tasks)} task(s) to {target_path}")
 
 
@@ -625,7 +626,7 @@ def report(
         written_path = write_quota_report(
             quota_report,
             cfg.paths.reports_dir,
-            fmt=fmt.value,  # type: ignore[arg-type]
+            fmt=fmt.value,
         )
         typer.echo(f"Wrote quota report to {written_path}", err=(fmt == ReportFormat.JSON))
 
@@ -842,7 +843,11 @@ def dashboard(
 
     open_browser = not no_browser
     if detach:
-        pid = spawn_detached_dashboard(port=port, open_browser=open_browser)
+        try:
+            pid = spawn_detached_dashboard(port=port, open_browser=open_browser)
+        except (RuntimeError, OSError) as exc:
+            typer.echo(f"Error starting detached dashboard server on port {port}: {exc}", err=True)
+            raise typer.Exit(code=1) from exc
         typer.echo(f"Quota Cockpit running at http://localhost:{port} (PID {pid})")
         return
 

@@ -40,16 +40,36 @@ def _ensure_utc(dt: datetime) -> datetime:
 def _open_registry_connection() -> sqlite3.Connection:
     db_path = get_registry_db_path()
     conn = sqlite3.connect(str(db_path), timeout=30.0)
-    conn.row_factory = sqlite3.Row
+    configure_wal_connection(conn)
     return conn
+
+
+def table_exists(conn: sqlite3.Connection, table_name: str) -> bool:
+    """Return ``True`` when `table_name` already exists in `sqlite_master`."""
+    row = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+        (table_name,),
+    ).fetchone()
+    return row is not None
+
+
+def configure_wal_connection(conn: sqlite3.Connection) -> None:
+    """Set row factory, busy timeout, and WAL mode without unnecessary write locks."""
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA busy_timeout = 30000;")
+    journal_row = conn.execute("PRAGMA journal_mode;").fetchone()
+    if journal_row is None or str(journal_row[0]).lower() != "wal":
+        conn.execute("PRAGMA journal_mode=WAL;")
+        conn.execute("PRAGMA synchronous=NORMAL;")
 
 
 def init_model_locks(conn: sqlite3.Connection) -> None:
     """Initialize WAL pragmas and the `model_locks` schema in `registry.db`."""
-    conn.execute("PRAGMA journal_mode=WAL;")
-    conn.execute("PRAGMA busy_timeout = 30000;")
-    conn.execute("PRAGMA synchronous=NORMAL;")
-    conn.execute("PRAGMA user_version = 1;")
+    configure_wal_connection(conn)
+    version_row = conn.execute("PRAGMA user_version;").fetchone()
+    version = int(version_row[0]) if version_row is not None else 0
+    if version >= 1 and table_exists(conn, "model_locks"):
+        return
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS model_locks (
@@ -61,6 +81,8 @@ def init_model_locks(conn: sqlite3.Connection) -> None:
         );
         """
     )
+    if version < 1:
+        conn.execute("PRAGMA user_version = 1;")
     conn.commit()
 
 
@@ -131,6 +153,8 @@ def set_shared_model_lock(
                 locked_by_pid = excluded.locked_by_pid,
                 reason = excluded.reason,
                 updated_at = excluded.updated_at
+            WHERE datetime(excluded.locked_until) >= datetime(model_locks.locked_until)
+               OR datetime(model_locks.locked_until) <= datetime('now')
             """,
             (canonical_group, locked_iso, pid, reason, now_iso),
         )
@@ -139,16 +163,31 @@ def set_shared_model_lock(
         conn.close()
 
 
-def clear_shared_model_lock(model: str) -> None:
-    """Remove any cached lock entry for `model` and its canonical shared quota group."""
+def clear_shared_model_lock(model: str, *, max_locked_until: datetime | None = None) -> None:
+    """Remove any cached lock entry for `model` and its canonical shared quota group.
+
+    When ``max_locked_until`` is supplied, only clears locks whose expiry is at or before
+    that threshold so a waking rolling sleeper never removes a newer, longer lockout.
+    """
     canonical_group = resolve_quota_group(model)
     conn = _open_registry_connection()
     try:
         init_model_locks(conn)
-        conn.execute(
-            "DELETE FROM model_locks WHERE model IN (?, ?)",
-            (canonical_group, model),
-        )
+        if max_locked_until is None:
+            conn.execute(
+                "DELETE FROM model_locks WHERE model IN (?, ?)",
+                (canonical_group, model),
+            )
+        else:
+            max_iso = _ensure_utc(max_locked_until).isoformat()
+            conn.execute(
+                """
+                DELETE FROM model_locks
+                WHERE model IN (?, ?)
+                  AND datetime(locked_until) <= datetime(?)
+                """,
+                (canonical_group, model, max_iso),
+            )
         conn.commit()
     finally:
         conn.close()

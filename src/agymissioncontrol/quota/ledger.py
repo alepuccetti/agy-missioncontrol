@@ -9,7 +9,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from agymissioncontrol.quota.locks import get_registry_db_path, resolve_quota_group
+from agymissioncontrol.quota.locks import (
+    configure_wal_connection,
+    get_registry_db_path,
+    resolve_quota_group,
+    table_exists,
+)
 from agymissioncontrol.quota.models import QuotaSnapshotRecord, UsageTelemetry
 from agymissioncontrol.quota.provider import calculate_cost_usd, estimate_quota_impact
 
@@ -26,11 +31,7 @@ def _ensure_utc(dt: datetime) -> datetime:
 
 
 def _configure_connection(conn: sqlite3.Connection) -> None:
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL;")
-    conn.execute("PRAGMA busy_timeout = 30000;")
-    conn.execute("PRAGMA synchronous=NORMAL;")
-    conn.execute("PRAGMA user_version = 1;")
+    configure_wal_connection(conn)
 
 
 @contextlib.contextmanager
@@ -55,7 +56,10 @@ def get_db(project_dir: Path | None = None) -> Iterator[sqlite3.Connection]:
 
 
 def _ensure_snapshot_table(conn: sqlite3.Connection) -> None:
-    conn.execute("PRAGMA user_version = 1;")
+    version_row = conn.execute("PRAGMA user_version;").fetchone()
+    version = int(version_row[0]) if version_row is not None else 0
+    if version >= 1 and table_exists(conn, "quota_snapshots"):
+        return
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS quota_snapshots (
@@ -75,10 +79,15 @@ def _ensure_snapshot_table(conn: sqlite3.Connection) -> None:
         ON quota_snapshots (model_family, limit_type, timestamp);
         """
     )
+    if version < 1:
+        conn.execute("PRAGMA user_version = 1;")
 
 
 def _ensure_token_transactions_table(conn: sqlite3.Connection) -> None:
-    conn.execute("PRAGMA user_version = 1;")
+    version_row = conn.execute("PRAGMA user_version;").fetchone()
+    version = int(version_row[0]) if version_row is not None else 0
+    if version >= 1 and table_exists(conn, "token_transactions"):
+        return
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS token_transactions (
@@ -109,6 +118,8 @@ def _ensure_token_transactions_table(conn: sqlite3.Connection) -> None:
         ON token_transactions (model, timestamp);
         """
     )
+    if version < 1:
+        conn.execute("PRAGMA user_version = 1;")
 
 
 def init_ledger(project_dir: Path | None = None) -> None:
@@ -170,7 +181,7 @@ def get_quota_history(
                 SELECT timestamp, model_family, limit_type, remaining_pct, reset_at, raw_line
                 FROM quota_snapshots
                 WHERE model_family IN (?, ?)
-                ORDER BY timestamp DESC, id DESC
+                ORDER BY datetime(timestamp) DESC, id DESC
                 LIMIT ?
                 """,
                 (model_family, canonical, limit),
@@ -180,7 +191,7 @@ def get_quota_history(
                 """
                 SELECT timestamp, model_family, limit_type, remaining_pct, reset_at, raw_line
                 FROM quota_snapshots
-                ORDER BY timestamp DESC, id DESC
+                ORDER BY datetime(timestamp) DESC, id DESC
                 LIMIT ?
                 """,
                 (limit,),
@@ -197,9 +208,10 @@ def record_token_transaction(
 ) -> int:
     """Insert an execution token transaction and return its ledger row ID."""
     ts_iso = _ensure_utc(recorded_at or datetime.now(UTC)).isoformat()
+    has_explicit_cost = "estimated_cost_usd" in usage.model_fields_set
     cost_usd = (
         usage.estimated_cost_usd
-        if usage.estimated_cost_usd > 0.0
+        if usage.estimated_cost_usd > 0.0 or (has_explicit_cost and not usage.is_credit_funded)
         else calculate_cost_usd(usage, model)
     )
     allowance_pct = (
