@@ -4,15 +4,22 @@ from __future__ import annotations
 
 import json
 import os
+from enum import StrEnum
 from pathlib import Path
 from typing import Annotated
 
 import typer
 from rich.console import Console
+from rich.table import Table
 from rich.tree import Tree
 
 import agymissioncontrol
-from agymissioncontrol.config import CreditPolicy, CreditTrigger, load_config
+from agymissioncontrol.config import (
+    CreditPolicy,
+    CreditTrigger,
+    ensure_gitignore_guard,
+    load_config,
+)
 from agymissioncontrol.manifest import (
     CyclicDependencyError,
     DependencyResolver,
@@ -33,9 +40,19 @@ from agymissioncontrol.quota import (
     AgyCliProvider,
     MockProvider,
     QuotaProvider,
+    build_quota_report,
+    clear_all_shared_model_locks,
+    clear_shared_model_lock,
     evaluate_and_gate,
     get_credit_spend,
     get_session_token_totals,
+    list_shared_model_locks,
+    parse_since_arg,
+    render_report_json,
+    render_report_markdown,
+    render_report_rich,
+    resolve_quota_group,
+    write_quota_report,
 )
 from agymissioncontrol.ui.display import build_status_payload, render_status_table
 
@@ -449,6 +466,160 @@ def plan(
     target_path.parent.mkdir(parents=True, exist_ok=True)
     target_path.write_text(rendered_manifest, encoding="utf-8")
     typer.echo(f"Wrote {len(ordered_tasks)} task(s) to {target_path}")
+
+
+class ReportFormat(StrEnum):
+    """Supported output formats for `agymissioncontrol report`."""
+
+    RICH = "rich"
+    MD = "md"
+    JSON = "json"
+
+
+@app.command()
+def report(
+    since: Annotated[
+        str | None,
+        typer.Option(
+            "--since",
+            help="Filter ledger history (e.g. '30m', '24h', '7d', or ISO-8601 timestamp).",
+        ),
+    ] = None,
+    fmt: Annotated[
+        ReportFormat,
+        typer.Option(
+            "--format",
+            "-f",
+            help="Report output format: rich | md | json.",
+        ),
+    ] = ReportFormat.RICH,
+    write: Annotated[
+        bool,
+        typer.Option(
+            "--write/--no-write",
+            help="Write report artifact under .agymissioncontrol/reports/.",
+        ),
+    ] = False,
+    project_dir: Annotated[
+        Path | None,
+        typer.Option(
+            "--project-dir",
+            help="Target project directory (defaults to current working directory).",
+        ),
+    ] = None,
+    config: Annotated[
+        Path | None,
+        typer.Option(
+            "--config",
+            help="Path to explicit .agymissioncontrol.yaml configuration file.",
+        ),
+    ] = None,
+) -> None:
+    """Generate quota pool, token overhead, and AI credit spend reports from SQLite."""
+    try:
+        since_dt = parse_since_arg(since)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc), param_hint="'--since'") from exc
+
+    cfg = load_config(config_path=config, project_dir=project_dir)
+    assert cfg.paths is not None
+    quota_report = build_quota_report(cfg, since=since_dt)
+
+    if fmt == ReportFormat.JSON:
+        typer.echo(render_report_json(quota_report))
+    elif fmt == ReportFormat.MD:
+        typer.echo(render_report_markdown(quota_report), nl=False)
+    else:
+        render_report_rich(quota_report)
+
+    if write:
+        ensure_gitignore_guard(cfg.paths.project_root)
+        written_path = write_quota_report(
+            quota_report,
+            cfg.paths.reports_dir,
+            fmt=fmt.value,  # type: ignore[arg-type]
+        )
+        typer.echo(f"Wrote quota report to {written_path}", err=(fmt == ReportFormat.JSON))
+
+
+@app.command()
+def locks(
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", help="Emit shared model locks as JSON."),
+    ] = False,
+    include_expired: Annotated[
+        bool,
+        typer.Option("--include-expired", help="Include expired lock entries in output."),
+    ] = False,
+) -> None:
+    """List active cross-project shared model locks from global `registry.db`."""
+    entries = list_shared_model_locks(include_expired=include_expired)
+    if json_output:
+        payload = [
+            {
+                **entry,
+                "locked_until": entry["locked_until"].isoformat(),
+                "updated_at": entry["updated_at"].isoformat(),
+            }
+            for entry in entries
+        ]
+        typer.echo(json.dumps(payload, indent=2))
+        return
+
+    if not entries:
+        typer.echo("No active shared model locks.")
+        return
+
+    table = Table(
+        title="agyMissionControl — Shared Model Locks",
+        show_header=True,
+        header_style="bold yellow",
+    )
+    table.add_column("Model Pool", style="bold", no_wrap=True)
+    table.add_column("Locked Until")
+    table.add_column("Remaining", justify="right")
+    table.add_column("PID", justify="right")
+    table.add_column("Reason")
+    table.add_column("Active")
+
+    for entry in entries:
+        table.add_row(
+            str(entry["model"]),
+            entry["locked_until"].isoformat(),
+            f"{entry['remaining_seconds']}s",
+            str(entry["locked_by_pid"]),
+            str(entry["reason"]),
+            "yes" if entry["is_active"] else "expired",
+        )
+    Console().print(table)
+
+
+@app.command()
+def unlock(
+    model: Annotated[
+        str | None,
+        typer.Argument(help="Model ID or canonical quota pool name to unlock."),
+    ] = None,
+    all_locks: Annotated[
+        bool,
+        typer.Option("--all", help="Clear all shared model locks in `registry.db`."),
+    ] = False,
+) -> None:
+    """Clear shared model locks in global `registry.db`."""
+    if not all_locks and not model:
+        typer.echo("Error: specify a MODEL argument or pass --all.", err=True)
+        raise typer.Exit(code=1)
+
+    if all_locks:
+        cleared = clear_all_shared_model_locks()
+        typer.echo(f"Cleared {cleared} shared model lock(s).")
+        return
+
+    assert model is not None
+    group = resolve_quota_group(model)
+    clear_shared_model_lock(model)
+    typer.echo(f"Cleared shared lock for {group} ({model}).")
 
 
 if __name__ == "__main__":

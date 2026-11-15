@@ -152,3 +152,53 @@ def clear_shared_model_lock(model: str) -> None:
         conn.commit()
     finally:
         conn.close()
+
+
+def list_shared_model_locks(include_expired: bool = False) -> list[dict[str, Any]]:
+    """Return active (or all, if `include_expired`) shared model locks from `registry.db`."""
+    now_utc = datetime.now(UTC)
+    conn = _open_registry_connection()
+    try:
+        init_model_locks(conn)
+        rows = conn.execute(
+            """
+            SELECT model, locked_until, locked_by_pid, reason, updated_at
+            FROM model_locks
+            ORDER BY locked_until ASC, model ASC
+            """
+        ).fetchall()
+
+        results: list[dict[str, Any]] = []
+        for row in rows:
+            locked_until = _ensure_utc(datetime.fromisoformat(row["locked_until"]))
+            updated_at = _ensure_utc(datetime.fromisoformat(row["updated_at"]))
+            remaining_seconds = max(0, int((locked_until - now_utc).total_seconds()))
+            is_active = locked_until > now_utc
+            if not include_expired and not is_active:
+                continue
+            results.append(
+                {
+                    "model": str(row["model"]),
+                    "locked_until": locked_until,
+                    "remaining_seconds": remaining_seconds,
+                    "locked_by_pid": int(row["locked_by_pid"]),
+                    "reason": str(row["reason"]),
+                    "updated_at": updated_at,
+                    "is_active": is_active,
+                }
+            )
+        return results
+    finally:
+        conn.close()
+
+
+def clear_all_shared_model_locks() -> int:
+    """Delete all shared model lock entries in `registry.db` and return count cleared."""
+    conn = _open_registry_connection()
+    try:
+        init_model_locks(conn)
+        cursor = conn.execute("DELETE FROM model_locks")
+        conn.commit()
+        return int(cursor.rowcount or 0)
+    finally:
+        conn.close()

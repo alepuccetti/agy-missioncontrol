@@ -254,7 +254,7 @@ def get_session_token_totals(
         params: list[Any] = []
         where_clause = ""
         if since is not None:
-            where_clause = "WHERE timestamp >= ?"
+            where_clause = "WHERE datetime(timestamp) >= datetime(?)"
             params.append(_ensure_utc(since).isoformat())
 
         row = conn.execute(
@@ -306,7 +306,7 @@ def get_credit_spend(
         params: list[Any] = []
         where_clause = "WHERE is_credit_funded = 1"
         if since is not None:
-            where_clause += " AND timestamp >= ?"
+            where_clause += " AND datetime(timestamp) >= datetime(?)"
             params.append(_ensure_utc(since).isoformat())
 
         query = (
