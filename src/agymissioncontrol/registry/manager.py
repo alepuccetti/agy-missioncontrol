@@ -188,9 +188,13 @@ def list_active_sessions(prune_dead: bool = True) -> list[SessionState]:
             alive: list[SessionState] = []
             dead_rows: list[tuple[int, str]] = []
             for row in rows:
-                pid = int(row["pid"])
+                try:
+                    pid = int(row["pid"])
+                    session = _row_to_session(row)
+                except ValueError, KeyError, TypeError:
+                    continue
                 if is_pid_alive(pid):
-                    alive.append(_row_to_session(row))
+                    alive.append(session)
                 else:
                     dead_rows.append((pid, str(row["updated_at"])))
             if prune_dead and dead_rows:

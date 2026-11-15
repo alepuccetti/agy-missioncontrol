@@ -208,9 +208,10 @@ def record_token_transaction(
 ) -> int:
     """Insert an execution token transaction and return its ledger row ID."""
     ts_iso = _ensure_utc(recorded_at or datetime.now(UTC)).isoformat()
+    has_explicit_cost = "estimated_cost_usd" in usage.model_fields_set
     cost_usd = (
         usage.estimated_cost_usd
-        if usage.estimated_cost_usd > 0.0
+        if usage.estimated_cost_usd > 0.0 or (has_explicit_cost and not usage.is_credit_funded)
         else calculate_cost_usd(usage, model)
     )
     allowance_pct = (

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from datetime import UTC, datetime
 
 from agymissioncontrol.quota.locks import resolve_quota_group
@@ -16,7 +17,7 @@ def calculate_sleep_duration(
     """Derive exact sleep seconds directly from the Google-reported reset timestamp.
 
     Returns ``0`` when ``now >= reset_at``; otherwise returns
-    ``int((reset_at - now).total_seconds()) + max(0, safety_buffer_seconds)``.
+    ``math.ceil((reset_at - now).total_seconds()) + max(0, safety_buffer_seconds)``.
     """
     current = now_utc or datetime.now(UTC)
     if current.tzinfo is None:
@@ -33,7 +34,7 @@ def calculate_sleep_duration(
     delta_seconds = (target - current).total_seconds()
     if delta_seconds <= 0:
         return 0
-    return int(delta_seconds) + max(0, safety_buffer_seconds)
+    return math.ceil(delta_seconds) + max(0, safety_buffer_seconds)
 
 
 def estimate_directional_allowance_pct(total_tokens: int, model: str) -> float:

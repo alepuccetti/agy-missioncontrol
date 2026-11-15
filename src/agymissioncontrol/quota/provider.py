@@ -77,7 +77,11 @@ def calculate_cost_usd(
     model: str,
     pricing_overrides: dict[str, PricingModel] | None = None,
 ) -> float:
-    """Compute estimated USD cost from token breakdowns and model pricing rates."""
+    """Compute estimated USD cost from token breakdowns and model pricing rates.
+
+    ``prompt_tokens`` represents *uncached* input tokens billed at ``input_per_1m``,
+    while ``cache_read_tokens`` are billed separately at ``cached_input_per_1m``.
+    """
     pricing = _resolve_pricing(model, pricing_overrides=pricing_overrides)
     if usage.prompt_tokens > 0 or usage.candidate_tokens > 0 or usage.thinking_tokens > 0:
         input_cost = (usage.prompt_tokens / 1_000_000) * pricing.input_per_1m

@@ -378,3 +378,20 @@ def test_read_paths_skip_write_ddl_when_schema_initialized(isolated_registry: Pa
             writer.rollback()
     finally:
         writer.close()
+
+    # Corrupt session row must be skipped without crashing `list_active_sessions` (QW-07)
+    conn = get_registry_db()
+    try:
+        with conn:
+            conn.execute(
+                """
+                INSERT INTO sessions (
+                    pid, project_name, project_dir, label, model, quota_group, state
+                ) VALUES (?, ?, ?, ?, ?, ?, ?);
+                """,
+                (os.getpid(), "corrupt", "/tmp/corrupt", "bad", "claude", "Claude", "BAD_STATE"),
+            )
+    finally:
+        conn.close()
+
+    assert list_active_sessions(prune_dead=False) == []

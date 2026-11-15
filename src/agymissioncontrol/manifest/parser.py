@@ -247,7 +247,7 @@ def merge_manifests(
             status=existing_item.status,
             depends_on=combined_deps,
             scope=incoming.scope or existing_item.scope,
-            constraints=existing_item.constraints or incoming.constraints,
+            constraints=incoming.constraints or existing_item.constraints,
             acceptance_criteria=(incoming.acceptance_criteria or existing_item.acceptance_criteria),
             verification=incoming.verification or existing_item.verification,
             commit_message=incoming.commit_message or existing_item.commit_message,

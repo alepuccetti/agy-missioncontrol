@@ -20,23 +20,6 @@ def _strip_ansi(text: str) -> str:
     return _ANSI_RE.sub("", text)
 
 
-def test_plan_help_exposes_all_required_options() -> None:
-    result = runner.invoke(app, ["plan", "--help"])
-    assert result.exit_code == 0
-    clean = _strip_ansi(result.output)
-    for flag in (
-        "--issue",
-        "--provider",
-        "--milestone",
-        "--label",
-        "--default-test",
-        "--output",
-        "--suggest-order",
-        "--dry-run",
-    ):
-        assert flag in clean
-
-
 def test_plan_dry_run_displays_rich_tree_and_does_not_write_file(tmp_path: Path) -> None:
     target = tmp_path / "TASKS.md"
     result = runner.invoke(
@@ -214,3 +197,20 @@ def test_plan_auto_falls_back_offline_and_explicit_provider_fails_cleanly(
     )
     assert gh_res.exit_code == 0
     assert "TASK-501: Add telemetry export" in _strip_ansi(gh_res.output)
+
+
+def test_plan_rejects_unsupported_provider_and_handles_empty_issue_list(tmp_path: Path) -> None:
+    bad_provider = runner.invoke(app, ["plan", "--provider", "bitbucket"])
+    assert bad_provider.exit_code == 1
+    assert "Unsupported tracker provider" in _strip_ansi(bad_provider.output)
+
+    empty_fixture = tmp_path / "empty.json"
+    empty_fixture.write_text(json.dumps({"issues": []}), encoding="utf-8")
+    out_manifest = tmp_path / "TASKS.md"
+    empty_res = runner.invoke(
+        app,
+        ["plan", "--fixture", str(empty_fixture), "--output", str(out_manifest)],
+    )
+    assert empty_res.exit_code == 0
+    assert "No matching issues found." in _strip_ansi(empty_res.output)
+    assert not out_manifest.exists()

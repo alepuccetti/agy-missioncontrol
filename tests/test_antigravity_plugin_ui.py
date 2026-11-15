@@ -212,3 +212,46 @@ def test_package_plugin_includes_skill_widget_and_display_name(tmp_path: Path) -
         packaged_manifest = json.loads(manifest_member.read().decode("utf-8"))
         assert packaged_manifest["displayName"] == "Mission Control"
         assert packaged_manifest["version"] == "1.0.0"
+
+
+def test_ui_widget_sqlite_fallback_without_agymissioncontrol_package(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """`ui_widget.py` works standalone via stdlib sqlite3 if `agymissioncontrol` is absent."""
+    import builtins
+    import sys
+
+    monkeypatch.setenv("AGY_MC_STATE_DIR", str(tmp_path / "state"))
+    init_registry()
+    now = datetime.now(UTC)
+    register_session(
+        SessionState(
+            pid=os.getpid(),
+            project_name="standalone-proj",
+            project_dir=str(tmp_path),
+            label="pill-test",
+            model="claude-sonnet-4-6",
+            quota_group="Claude and GPT models",
+            state=SessionStatus.SLEEPING,
+            wakes_at=now + timedelta(minutes=8),
+            updated_at=now,
+        )
+    )
+
+    real_import = builtins.__import__
+
+    def _blocking_import(name: str, *args: object, **kwargs: object) -> object:
+        if name == "agymissioncontrol" or name.startswith("agymissioncontrol."):
+            raise ImportError("simulated isolated skill runtime")
+        return real_import(name, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(builtins, "__import__", _blocking_import)
+    try:
+        mod = _load_module("standalone_ui_widget", WIDGET_SCRIPT)
+        pill = mod.generate_ide_status_pill()
+        md = mod.render_quota_status_markdown()
+        assert "1 Gate Sleeping" in pill
+        assert "standalone-proj" in md
+    finally:
+        sys.modules.pop("standalone_ui_widget", None)

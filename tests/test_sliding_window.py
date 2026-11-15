@@ -46,6 +46,20 @@ def test_calculate_sleep_duration_boundaries() -> None:
     naive_reset = datetime(2026, 11, 14, 12, 2, 5)
     assert calculate_sleep_duration(naive_reset, safety_buffer_seconds=15, now_utc=naive_now) == 140
 
+    # Sub-second positive remainders ceil upward so sleep never wakes before reset (QW-01)
+    assert (
+        calculate_sleep_duration(
+            now + timedelta(milliseconds=250), safety_buffer_seconds=0, now_utc=now
+        )
+        == 1
+    )
+    assert (
+        calculate_sleep_duration(
+            now + timedelta(milliseconds=1250), safety_buffer_seconds=10, now_utc=now
+        )
+        == 12
+    )
+
 
 def test_estimate_directional_allowance_pct() -> None:
     assert estimate_directional_allowance_pct(250_000, "claude-3-7-sonnet") == 25.0
@@ -231,3 +245,23 @@ def test_get_quota_history_mixed_timestamp_ordering(
     assert [entry["raw_line"] for entry in by_family] == ["t1", "t2", "t3", "t4"]
     all_history = get_quota_history(proj_dir, limit=10)
     assert [entry["raw_line"] for entry in all_history] == ["t1", "t2", "t3", "t4"]
+
+
+def test_explicit_zero_cost_preserved_when_non_credit_funded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("AGY_MC_STATE_DIR", str(tmp_path / "state"))
+    proj_dir = tmp_path / "repo-zero-cost"
+    proj_dir.mkdir()
+    record_token_transaction(
+        proj_dir,
+        task_id="E05-T04-ZERO",
+        model="claude-3-7-sonnet",
+        usage=UsageTelemetry(
+            prompt_tokens=100_000,
+            work_tokens=100_000,
+            estimated_cost_usd=0.0,
+            is_credit_funded=False,
+        ),
+    )
+    assert get_session_token_totals(proj_dir).estimated_cost_usd == 0.0

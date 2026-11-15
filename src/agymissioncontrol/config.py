@@ -223,29 +223,20 @@ def _env_overrides() -> dict[str, Any]:
         set_nested("models", "fallback_model", env["AGY_FALLBACK_MODEL"])
 
     if "AGY_THRESHOLD_PERCENT" in env:
-        set_nested("governor", "threshold_percent", float(env["AGY_THRESHOLD_PERCENT"]))
+        set_nested("governor", "threshold_percent", env["AGY_THRESHOLD_PERCENT"])
     if "AGY_WEEKLY_THRESHOLD_PERCENT" in env:
-        set_nested(
-            "governor",
-            "weekly_threshold_percent",
-            float(env["AGY_WEEKLY_THRESHOLD_PERCENT"]),
-        )
+        set_nested("governor", "weekly_threshold_percent", env["AGY_WEEKLY_THRESHOLD_PERCENT"])
     if "AGY_SAFETY_BUFFER_SECONDS" in env:
-        set_nested("governor", "safety_buffer_seconds", int(env["AGY_SAFETY_BUFFER_SECONDS"]))
+        set_nested("governor", "safety_buffer_seconds", env["AGY_SAFETY_BUFFER_SECONDS"])
     if "AGY_MAX_SLEEP_SECONDS" in env:
-        set_nested("governor", "max_sleep_seconds", int(env["AGY_MAX_SLEEP_SECONDS"]))
+        set_nested("governor", "max_sleep_seconds", env["AGY_MAX_SLEEP_SECONDS"])
     if "AGY_MAX_SESSION_TOKENS" in env:
-        set_nested("governor", "max_session_tokens", int(env["AGY_MAX_SESSION_TOKENS"]))
+        set_nested("governor", "max_session_tokens", env["AGY_MAX_SESSION_TOKENS"])
 
     if "AGY_CREDIT_POLICY" in env:
         set_nested("governor", "policy", env["AGY_CREDIT_POLICY"], sub_section="credits")
     if "AGY_MAX_CREDIT_BURN" in env:
-        set_nested(
-            "governor",
-            "max_burn_usd",
-            float(env["AGY_MAX_CREDIT_BURN"]),
-            sub_section="credits",
-        )
+        set_nested("governor", "max_burn_usd", env["AGY_MAX_CREDIT_BURN"], sub_section="credits")
     if "AGY_CREDIT_TRIGGER" in env:
         set_nested("governor", "trigger", env["AGY_CREDIT_TRIGGER"], sub_section="credits")
     if "AGY_CREDIT_ON_CAP_REACHED" in env:

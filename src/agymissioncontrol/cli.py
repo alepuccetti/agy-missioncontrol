@@ -626,7 +626,7 @@ def report(
         written_path = write_quota_report(
             quota_report,
             cfg.paths.reports_dir,
-            fmt=fmt.value,  # type: ignore[arg-type]
+            fmt=fmt.value,
         )
         typer.echo(f"Wrote quota report to {written_path}", err=(fmt == ReportFormat.JSON))
 
