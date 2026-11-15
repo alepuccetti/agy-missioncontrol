@@ -1,6 +1,11 @@
 """Global SQLite gate process & quota registry package."""
 
-from agymissioncontrol.registry.db import get_registry_db, get_state_dir, init_registry
+from agymissioncontrol.registry.db import (
+    ensure_registry_schema,
+    get_registry_db,
+    get_state_dir,
+    init_registry,
+)
 from agymissioncontrol.registry.manager import (
     is_pid_alive,
     list_active_sessions,
@@ -19,6 +24,7 @@ from agymissioncontrol.registry.models import SessionState, SessionStatus
 __all__ = [
     "SessionState",
     "SessionStatus",
+    "ensure_registry_schema",
     "get_registry_db",
     "get_state_dir",
     "init_registry",

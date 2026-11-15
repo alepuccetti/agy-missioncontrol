@@ -9,7 +9,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from agymissioncontrol.quota.locks import get_registry_db_path, resolve_quota_group
+from agymissioncontrol.quota.locks import (
+    configure_wal_connection,
+    get_registry_db_path,
+    resolve_quota_group,
+    table_exists,
+)
 from agymissioncontrol.quota.models import QuotaSnapshotRecord, UsageTelemetry
 from agymissioncontrol.quota.provider import calculate_cost_usd, estimate_quota_impact
 
@@ -26,11 +31,7 @@ def _ensure_utc(dt: datetime) -> datetime:
 
 
 def _configure_connection(conn: sqlite3.Connection) -> None:
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL;")
-    conn.execute("PRAGMA busy_timeout = 30000;")
-    conn.execute("PRAGMA synchronous=NORMAL;")
-    conn.execute("PRAGMA user_version = 1;")
+    configure_wal_connection(conn)
 
 
 @contextlib.contextmanager
@@ -55,7 +56,10 @@ def get_db(project_dir: Path | None = None) -> Iterator[sqlite3.Connection]:
 
 
 def _ensure_snapshot_table(conn: sqlite3.Connection) -> None:
-    conn.execute("PRAGMA user_version = 1;")
+    version_row = conn.execute("PRAGMA user_version;").fetchone()
+    version = int(version_row[0]) if version_row is not None else 0
+    if version >= 1 and table_exists(conn, "quota_snapshots"):
+        return
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS quota_snapshots (
@@ -75,10 +79,15 @@ def _ensure_snapshot_table(conn: sqlite3.Connection) -> None:
         ON quota_snapshots (model_family, limit_type, timestamp);
         """
     )
+    if version < 1:
+        conn.execute("PRAGMA user_version = 1;")
 
 
 def _ensure_token_transactions_table(conn: sqlite3.Connection) -> None:
-    conn.execute("PRAGMA user_version = 1;")
+    version_row = conn.execute("PRAGMA user_version;").fetchone()
+    version = int(version_row[0]) if version_row is not None else 0
+    if version >= 1 and table_exists(conn, "token_transactions"):
+        return
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS token_transactions (
@@ -109,6 +118,8 @@ def _ensure_token_transactions_table(conn: sqlite3.Connection) -> None:
         ON token_transactions (model, timestamp);
         """
     )
+    if version < 1:
+        conn.execute("PRAGMA user_version = 1;")
 
 
 def init_ledger(project_dir: Path | None = None) -> None:

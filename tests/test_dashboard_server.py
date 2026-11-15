@@ -316,3 +316,12 @@ def test_dashboard_cli_detach_stop_and_stale_pid_handling(
             ["dashboard", "--port", str(busy_port), "--no-browser"],
         )
         assert res_busy.exit_code == 1
+
+    # Immediate child exit in detached mode fails closed without writing dashboard.pid
+    def _failing_popen(_cmd: list[str], **_kwargs: object) -> SimpleNamespace:
+        return SimpleNamespace(pid=999999, poll=lambda: 1)
+
+    monkeypatch.setattr("agymissioncontrol.ui.server.subprocess.Popen", _failing_popen)
+    res_fail_detach = runner.invoke(app, ["dashboard", "--port", "9595", "--detach"])
+    assert res_fail_detach.exit_code == 1
+    assert not get_dashboard_pid_path().exists()

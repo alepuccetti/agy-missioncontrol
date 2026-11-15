@@ -68,6 +68,8 @@ def test_hook_configs_and_plugin_manifest() -> None:
         "agy status",
         "agymissioncontrol --version",
         "git status | head -n 5",
+        'git commit -m "fix: a; b"',
+        "git -C . status",
     ],
 )
 def test_nested_toolcall_allows_safe_commands(command: str) -> None:
@@ -88,6 +90,9 @@ def test_nested_toolcall_allows_safe_commands(command: str) -> None:
         "rm -rf /",
         "rm -fr /*",
         "rm -r -f /",
+        "/bin/rm -rf /",
+        "command rm -rf /",
+        "ENV=1 rm -rf /",
         "sudo rm -rf /etc",
         "cat ~/.ssh/id_rsa",
         "echo bad > /etc/hosts",
@@ -109,6 +114,10 @@ def test_denies_destructive_and_credential_commands(command: str) -> None:
     [
         "git push origin main",
         "git push --force",
+        "git -C . push",
+        'python3 -c "print(1)"',
+        'python -c "import sys"',
+        "rm -rf .",
         "rm -rf ~/Desktop/old",
         "rm -rf ../sibling-repo",
         "rm -rf /Users/other/old-cache",
@@ -131,7 +140,8 @@ def test_asks_for_sensitive_or_unrecognized_commands(command: str) -> None:
 
 
 def test_empty_eof_and_malformed_json_handle_gracefully() -> None:
-    """Empty stdin allows without hanging; malformed JSON fails safe to ask."""
+    """Empty stdin allows without hanging; malformed or non-dict JSON fails safe to ask."""
     assert run_guard("")["decision"] == "allow"
     assert run_guard("{not-valid-json")["decision"] == "ask"
+    assert run_guard("[1, 2, 3]")["decision"] == "ask"
     assert run_guard({})["decision"] == "allow"

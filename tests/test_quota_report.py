@@ -23,6 +23,7 @@ from agymissioncontrol.quota import (
     record_quota_snapshots,
     record_token_transaction,
     set_shared_model_lock,
+    write_quota_report,
 )
 from agymissioncontrol.quota.locks import get_registry_db_path, init_model_locks
 
@@ -408,3 +409,26 @@ def test_governor_on_event_callbacks(
     assert decision_shared.action == GateAction.LOCKOUT_WEEKLY
     assert [e[0] for e in shared_events] == ["HARD_LOCKOUT"]
     assert shared_events[0][1]["source"] == "shared_lock"
+
+
+def test_write_quota_report_same_second_collision_avoidance(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two writes sharing identical timestamps produce distinct report artifacts."""
+    monkeypatch.setenv("AGY_MC_STATE_DIR", str(tmp_path / "state"))
+    proj = tmp_path / "repo-collision"
+    proj.mkdir()
+    cfg = load_config(project_dir=proj)
+    assert cfg.paths is not None
+
+    report = build_quota_report(cfg)
+    p1 = write_quota_report(report, cfg.paths.reports_dir, fmt="md")
+    p2 = write_quota_report(report, cfg.paths.reports_dir, fmt="md")
+    j1 = write_quota_report(report, cfg.paths.reports_dir, fmt="json")
+    j2 = write_quota_report(report, cfg.paths.reports_dir, fmt="json")
+
+    assert p1 != p2
+    assert p1.exists() and p2.exists()
+    assert j1 != j2
+    assert j1.exists() and j2.exists()
+    assert list(cfg.paths.reports_dir.glob("*.tmp")) == []

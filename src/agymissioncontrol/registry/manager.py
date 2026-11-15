@@ -9,7 +9,7 @@ import sqlite3
 from datetime import UTC, datetime
 
 from agymissioncontrol.quota.locks import resolve_quota_group
-from agymissioncontrol.registry.db import get_registry_db, init_registry
+from agymissioncontrol.registry.db import ensure_registry_schema, get_registry_db
 from agymissioncontrol.registry.models import SessionState, SessionStatus
 
 _KNOWN_POOL_TOKENS = (
@@ -76,10 +76,10 @@ def is_pid_alive(pid: int) -> bool:
 
 def register_session(session: SessionState) -> SessionState:
     """Insert or update a `gate` session row in `registry.db`."""
-    init_registry()
     now_iso = _to_iso(session.updated_at) or datetime.now(UTC).isoformat()
     conn = get_registry_db()
     try:
+        ensure_registry_schema(conn)
         with conn:
             conn.execute(
                 """
@@ -127,11 +127,11 @@ def update_session_state(
     credit_burn_usd: float | None = None,
 ) -> bool:
     """Update lifecycle state and optional sleep/credit fields for `pid`."""
-    init_registry()
     now_iso = datetime.now(UTC).isoformat()
     state_str = str(SessionStatus(state))
     conn = get_registry_db()
     try:
+        ensure_registry_schema(conn)
         with conn:
             if credit_burn_usd is None:
                 cursor = conn.execute(
@@ -166,9 +166,9 @@ def update_session_state(
 
 def unregister_session(pid: int) -> bool:
     """Remove session `pid` from `registry.db`."""
-    init_registry()
     conn = get_registry_db()
     try:
+        ensure_registry_schema(conn)
         with conn:
             cursor = conn.execute("DELETE FROM sessions WHERE pid = ?;", (pid,))
             return cursor.rowcount > 0
@@ -178,9 +178,9 @@ def unregister_session(pid: int) -> bool:
 
 def list_active_sessions(prune_dead: bool = True) -> list[SessionState]:
     """Return living registered sessions, atomically pruning dead OS PIDs."""
-    init_registry()
     conn = get_registry_db()
     try:
+        ensure_registry_schema(conn)
         with conn:
             rows = conn.execute(
                 "SELECT * FROM sessions ORDER BY updated_at DESC, pid ASC;"

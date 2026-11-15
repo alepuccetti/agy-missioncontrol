@@ -349,3 +349,32 @@ def test_pid_reuse_updated_at_and_permission_error_safety(isolated_registry: Pat
         surviving = list_active_sessions()
     assert len(surviving) == 1
     assert surviving[0].project_name == "new-live-proc"
+
+
+def test_read_paths_skip_write_ddl_when_schema_initialized(isolated_registry: Path) -> None:
+    """Read helpers do not acquire write locks or overwrite user_version once initialized."""
+    from agymissioncontrol.quota.ledger import get_quota_history
+    from agymissioncontrol.quota.locks import (
+        get_shared_model_lock_details,
+        list_shared_model_locks,
+    )
+
+    init_registry()
+    writer = get_registry_db()
+    try:
+        with writer:
+            writer.execute("PRAGMA user_version = 7;")
+
+        # Hold a WAL write lock; pure read paths must succeed without DDL write locks.
+        writer.execute("BEGIN IMMEDIATE;")
+        try:
+            assert list_active_sessions(prune_dead=False) == []
+            assert get_shared_model_lock_details("claude-3-7-sonnet") is None
+            assert list_shared_model_locks() == []
+            assert get_quota_history(limit=5) == []
+            version_after = writer.execute("PRAGMA user_version;").fetchone()[0]
+            assert version_after == 7
+        finally:
+            writer.rollback()
+    finally:
+        writer.close()

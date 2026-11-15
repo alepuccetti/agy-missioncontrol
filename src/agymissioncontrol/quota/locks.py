@@ -40,16 +40,36 @@ def _ensure_utc(dt: datetime) -> datetime:
 def _open_registry_connection() -> sqlite3.Connection:
     db_path = get_registry_db_path()
     conn = sqlite3.connect(str(db_path), timeout=30.0)
-    conn.row_factory = sqlite3.Row
+    configure_wal_connection(conn)
     return conn
+
+
+def table_exists(conn: sqlite3.Connection, table_name: str) -> bool:
+    """Return ``True`` when `table_name` already exists in `sqlite_master`."""
+    row = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+        (table_name,),
+    ).fetchone()
+    return row is not None
+
+
+def configure_wal_connection(conn: sqlite3.Connection) -> None:
+    """Set row factory, busy timeout, and WAL mode without unnecessary write locks."""
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA busy_timeout = 30000;")
+    journal_row = conn.execute("PRAGMA journal_mode;").fetchone()
+    if journal_row is None or str(journal_row[0]).lower() != "wal":
+        conn.execute("PRAGMA journal_mode=WAL;")
+        conn.execute("PRAGMA synchronous=NORMAL;")
 
 
 def init_model_locks(conn: sqlite3.Connection) -> None:
     """Initialize WAL pragmas and the `model_locks` schema in `registry.db`."""
-    conn.execute("PRAGMA journal_mode=WAL;")
-    conn.execute("PRAGMA busy_timeout = 30000;")
-    conn.execute("PRAGMA synchronous=NORMAL;")
-    conn.execute("PRAGMA user_version = 1;")
+    configure_wal_connection(conn)
+    version_row = conn.execute("PRAGMA user_version;").fetchone()
+    version = int(version_row[0]) if version_row is not None else 0
+    if version >= 1 and table_exists(conn, "model_locks"):
+        return
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS model_locks (
@@ -61,6 +81,8 @@ def init_model_locks(conn: sqlite3.Connection) -> None:
         );
         """
     )
+    if version < 1:
+        conn.execute("PRAGMA user_version = 1;")
     conn.commit()
 
 
