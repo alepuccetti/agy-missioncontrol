@@ -49,6 +49,7 @@ class GateDecision(BaseModel):
     sleep_seconds: int = 0
     reset_at: datetime | None = None
     model_quota: ModelQuota | None = None
+    woken_early: bool = False
 
 
 def evaluate_gate_decision(
@@ -342,7 +343,7 @@ def evaluate_and_gate(
                 "source": "shared_lock",
             },
         )
-        execute_sleep(
+        completed = execute_sleep(
             sleep_seconds,
             model,
             wakes_at=lock_until,
@@ -350,6 +351,20 @@ def evaluate_and_gate(
             is_tty=is_tty,
             out_stream=out_stream,
         )
+        if completed is False:
+            _emit_event(
+                on_event,
+                "SLEEP_WOKEN",
+                {"model": model, "source": "shared_lock", "wakes_at": _format_utc_iso(lock_until)},
+            )
+            return GateDecision(
+                action=GateAction.SLEEP_ROLLING,
+                reason="Woken early by SIGUSR1; re-evaluating quota",
+                exit_code=1,
+                sleep_seconds=sleep_seconds,
+                reset_at=lock_until,
+                woken_early=True,
+            )
         clear_shared_model_lock(model)
         return GateDecision(
             action=GateAction.PROCEED_FREE,
@@ -469,7 +484,7 @@ def evaluate_and_gate(
             "source": "provider",
         },
     )
-    execute_sleep(
+    completed = execute_sleep(
         sleep_seconds,
         model,
         wakes_at=reset_at,
@@ -477,6 +492,21 @@ def evaluate_and_gate(
         is_tty=is_tty,
         out_stream=out_stream,
     )
+    if completed is False:
+        _emit_event(
+            on_event,
+            "SLEEP_WOKEN",
+            {"model": model, "source": "provider", "wakes_at": _format_utc_iso(reset_at)},
+        )
+        return GateDecision(
+            action=GateAction.SLEEP_ROLLING,
+            reason="Woken early by SIGUSR1; re-evaluating quota",
+            exit_code=1,
+            sleep_seconds=sleep_seconds,
+            reset_at=reset_at,
+            model_quota=quota,
+            woken_early=True,
+        )
     clear_shared_model_lock(model)
     return GateDecision(
         action=GateAction.PROCEED_FREE,
