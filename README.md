@@ -170,8 +170,8 @@ Command: agymissioncontrol plan (optional)
 ## 7. Development Roadmap
 
 `agyMissionControl` is organized into **3 Semantic Release Milestones** covering quota governance, reporting, multi-session visibility, and the optional standalone `plan` helper:
-- **Milestone v0.1.0-alpha (Foundational Setup & Quota Gatekeeper — Completed):** Workspace setup, developer tooling (`Taskfile.yml`), permissions guardrails, dual-tier quota governor (`gate` / `status`), embedded SQLite WAL ledgers (`missioncontrol.db`, `registry.db`), shared cross-project locks, AI credit budget governance, and zero-token sleep engine.
-- **Milestone v0.2.0-beta (Optional `plan` Helper, Quota Reports & Public Releases):** Standalone optional `plan` tool (completed), quota & credit reporting (`report`), shared lock CLI control (`locks` / `unlock`), and automated public GitHub Releases (`darwin-arm64` & `linux-x86_64` binaries + plugin bundle).
+- **Milestone v0.1.0 (Foundational Setup & Quota Gatekeeper — Completed):** Workspace setup, developer tooling (`Taskfile.yml`), permissions guardrails, dual-tier quota governor (`gate` / `status`), embedded SQLite WAL ledgers (`missioncontrol.db`, `registry.db`), shared cross-project locks, AI credit budget governance, and zero-token sleep engine.
+- **Milestone v0.2.0 (Optional `plan` Helper, Quota Reports & Public Releases — Completed):** Standalone optional `plan` tool (completed), quota & credit reporting (`report`), shared lock CLI control (`locks` / `unlock`), and automated public GitHub Releases (`darwin-arm64` & `linux-x86_64` binaries + plugin bundle).
 - **Milestone v1.0.0 GA (Multi-Session Gate Registry & Live Quota Cockpit):** SQLite-backed active/sleeping `gate` registry (`registry.db`), `ps` / `wake` / `stop` early wakeup control (`SIGUSR1`), zero-dependency dark-mode quota cockpit (TypeScript + Alpine.js + Lucide + historical SVG charts) on `localhost:8484`, and Antigravity Orchestrator skill + IDE status pill.
 
 ---
