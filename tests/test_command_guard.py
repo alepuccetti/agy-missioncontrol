@@ -31,6 +31,7 @@ def test_hook_configs_and_plugin_manifest() -> None:
     """Validates Antigravity hook JSON schemas and plugin manifest alignment."""
     plugin_manifest = json.loads((REPO_ROOT / "plugin" / "plugin.json").read_text())
     assert plugin_manifest["name"] == "agymissioncontrol"
+    assert plugin_manifest["displayName"] == "Mission Control"
 
     workspace_hooks = json.loads((REPO_ROOT / ".agents" / "hooks.json").read_text())
     plugin_hooks = json.loads((REPO_ROOT / "plugin" / "hooks.json").read_text())
