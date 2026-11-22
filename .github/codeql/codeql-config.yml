@@ -1,0 +1,5 @@
+name: "CodeQL Configuration"
+
+paths-ignore:
+  # Exclude compiled/minified Vite bundle artifacts from JS/TS analysis
+  - src/agymissioncontrol/ui/static/**

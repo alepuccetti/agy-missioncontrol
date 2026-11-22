@@ -1,5 +1,12 @@
 # Project Specification: agyMissionControl
 
+[![CI Pipeline](https://github.com/alepuccetti/agy-missioncontrol/actions/workflows/ci.yml/badge.svg)](https://github.com/alepuccetti/agy-missioncontrol/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/alepuccetti/agy-missioncontrol/actions/workflows/codeql.yml/badge.svg)](https://github.com/alepuccetti/agy-missioncontrol/actions/workflows/codeql.yml)
+[![Security & Dependency Audit](https://github.com/alepuccetti/agy-missioncontrol/actions/workflows/security-audit.yml/badge.svg)](https://github.com/alepuccetti/agy-missioncontrol/actions/workflows/security-audit.yml)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/alepuccetti/agy-missioncontrol/badge)](https://scorecard.dev/viewer/?uri=github.com/alepuccetti/agy-missioncontrol)
+[![Release](https://img.shields.io/github/v/release/alepuccetti/agy-missioncontrol)](https://github.com/alepuccetti/agy-missioncontrol/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 Authoritative quota governor, zero-token sleep controller, and live quota cockpit for Google Antigravity (`agy`).
 
 ---
@@ -176,6 +183,51 @@ Command: agymissioncontrol plan (optional)
 
 ---
 
-## 8. License
+## 8. Security, Quality Checks & Repository Setup
+
+### Automated Workflow & Repository Checks
+
+| Check | Trigger | Scope |
+|---|---|---|
+| **CI Pipeline** (`.github/workflows/ci.yml`) | Push / PR to `main` | Ruff format & lint, `pytest`, TypeScript typecheck + Vite build (`task ui:build`), and PyInstaller binary compilation on `ubuntu-24.04` & `macos-15`. |
+| **CodeQL Security & Quality** (`.github/workflows/codeql.yml`) | Push / PR to `main`, weekly | Static security & code-quality analysis (`security-and-quality` suite) across `python`, `javascript-typescript`, and `actions` (ignoring compiled static assets via `.github/codeql/codeql-config.yml`). |
+| **Dependency Review** (`.github/workflows/dependency-review.yml`) | PR to `main` | Blocks PRs introducing dependencies with `moderate` or higher vulnerabilities. |
+| **Security & Dependency Audit** (`.github/workflows/security-audit.yml`) | Push / PR to `main`, weekly | Audits locked Python dependencies (`pip-audit` via `uv export`) and frontend dependencies (`pnpm audit --audit-level=moderate`). |
+| **OpenSSF Scorecard** (`.github/workflows/scorecard.yml`) | Push to `main`, ruleset change, weekly | Evaluates supply-chain security posture and uploads SARIF results to GitHub Code Scanning. |
+| **Dependabot Version Updates** (`.github/dependabot.yml`) | Weekly | Automated grouped dependency update PRs for `uv`, `npm` (`/src/agymissioncontrol/ui/frontend`), and `github-actions`. |
+| **Release Attestations** (`.github/workflows/release.yml`) | Tag `v*.*.*` | Generates SHA-256 checksums and SLSA build provenance attestations (`actions/attest@v4`) verifiable via `gh attestation verify`. |
+| **Security Policy** (`SECURITY.md`) | Always active | Directs vulnerability disclosures to GitHub Private Vulnerability Reporting. |
+
+### Manual GitHub Repository Settings Checklist
+
+After merging these workflows to `main`, enable the remaining free GitHub features in the repository settings UI:
+
+1. **Code Security & Analysis** (`Settings → Code security`, `/settings/security_analysis`):
+   - **Dependency graph**: Enable.
+   - **Dependabot alerts**: Enable.
+   - **Dependabot security updates**: Enable (and optionally **Grouped security updates**).
+   - **Private vulnerability reporting**: Enable.
+   - **Secret scanning & Push protection**: Verify enabled (with **Validity checks** and **Non-provider patterns** enabled if available).
+   - **Code scanning**: **Do not** enable *Default setup*—Advanced setup is already configured via `.github/workflows/codeql.yml` and activates automatically once merged to `main`.
+2. **Branch Rulesets (`main`)** (`Settings → Rules → Rulesets → main`):
+   - Keep **Restrict deletions**, **Block force pushes**, and **Require signed commits** enabled.
+   - Enable **Require a pull request before merging** (set required approvals as desired).
+   - Enable **Require status checks to pass** and add:
+     - `Lint, Test & Validate (ubuntu-24.04)`
+     - `Lint, Test & Validate (macos-15)`
+     - `Analyze (python)`
+     - `Analyze (javascript-typescript)`
+     - `Analyze (actions)`
+     - `Review Dependency Changes`
+     - `Python Dependency Audit (pip-audit)`
+     - `Frontend Dependency Audit (pnpm audit)`
+   - Enable **Require code scanning results** to block PRs introducing new CodeQL security or code-quality alerts.
+3. **General Settings** (`Settings → General`):
+   - Enable **Automatically delete head branches** under **Pull Requests**.
+   - Enable **Immutable releases** under **Releases** to prevent tag or release asset tampering after publication.
+
+---
+
+## 9. License
 
 Open source under the [MIT License](LICENSE).
