@@ -17,9 +17,14 @@ tasks:
       - task --list
 
   install:
-    desc: Install virtual environment and development dependencies
+    desc: Install virtual environment and development dependencies (enforces 3-day cooldown)
     cmds:
       - uv sync --dev
+
+  install:bypass:
+    desc: Emergency bypass of 3-day dependency cooldown for Python install
+    cmds:
+      - UV_EXCLUDE_NEWER=false uv sync --dev
 
   test:
     desc: Run pytest test suite
@@ -64,9 +69,14 @@ tasks:
       - echo "Plugin symlink removed."
 
   ui:install:
-    desc: Install frontend dependencies (pnpm)
+    desc: Install frontend dependencies (pnpm, enforces 3-day cooldown)
     cmds:
       - '[ -f "{{.UI_DIR}}/package.json" ] && pnpm --prefix {{.UI_DIR}} install || echo "Frontend package.json not yet scaffolded; skipping pnpm install."'
+
+  ui:install:bypass:
+    desc: Emergency bypass of 3-day dependency cooldown for frontend install
+    cmds:
+      - '[ -f "{{.UI_DIR}}/package.json" ] && PNPM_CONFIG_MINIMUM_RELEASE_AGE=0 pnpm --prefix {{.UI_DIR}} install || echo "Frontend package.json not yet scaffolded; skipping pnpm install."'
 
   ui:build:
     desc: Compile TypeScript + Alpine.js dashboard into static assets

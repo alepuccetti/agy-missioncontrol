@@ -3,3 +3,9 @@ packages:
 
 allowBuilds:
   esbuild: true
+
+# 3-day (4320 minutes) supply-chain cooldown on npm package installations
+minimumReleaseAge: 4320
+
+# Emergency per-package bypass (list package names or globs to exempt)
+minimumReleaseAgeExclude: []

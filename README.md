@@ -194,9 +194,27 @@ Command: agymissioncontrol plan (optional)
 | **Dependency Review** (`.github/workflows/dependency-review.yml`) | PR to `main` | Blocks PRs introducing dependencies with `moderate` or higher vulnerabilities. |
 | **Security & Dependency Audit** (`.github/workflows/security-audit.yml`) | Push / PR to `main`, weekly | Audits locked Python dependencies (`pip-audit` via `uv export`) and frontend dependencies (`pnpm audit --audit-level=moderate`). |
 | **OpenSSF Scorecard** (`.github/workflows/scorecard.yml`) | Push to `main`, ruleset change, weekly | Evaluates supply-chain security posture and uploads SARIF results to GitHub Code Scanning. |
-| **Dependabot Version Updates** (`.github/dependabot.yml`) | Weekly | Automated grouped dependency update PRs for `uv`, `npm` (`/src/agymissioncontrol/ui/frontend`), and `github-actions`. |
+| **Dependabot Version Updates** (`.github/dependabot.yml`) | Weekly | Automated grouped dependency update PRs for `uv`, `npm` (`/src/agymissioncontrol/ui/frontend`), and `github-actions` with a 3-day cooldown. |
 | **Release Attestations** (`.github/workflows/release.yml`) | Tag `v*.*.*` | Generates SHA-256 checksums and SLSA build provenance attestations (`actions/attest@v4`) verifiable via `gh attestation verify`. |
 | **Security Policy** (`SECURITY.md`) | Always active | Directs vulnerability disclosures to GitHub Private Vulnerability Reporting. |
+
+### Package Installation Cooldown (3 Days) & Emergency Bypass
+
+To reduce supply-chain risk from newly published or compromised packages, both Python and frontend package managers enforce a **3-day release age cooldown**:
+
+- **Python (`uv`)**: Configured in `pyproject.toml` (`[tool.uv] exclude-newer = "3 days"`) and recorded in `uv.lock` (`exclude-newer-span = "P3D"`).
+- **Frontend (`pnpm`)**: Configured in `src/agymissioncontrol/ui/frontend/pnpm-workspace.yaml` (`minimumReleaseAge: 4320` minutes).
+- **Dependabot**: Configured in `.github/dependabot.yml` (`cooldown.default-days: 3`) for `uv` and `npm`.
+
+#### Emergency Bypass Options
+
+1. **One-off global bypass (local / urgent sync):**
+   - Python: `task install:bypass` (or `UV_EXCLUDE_NEWER=false uv sync --dev` / `uv lock --exclude-newer false`)
+   - Frontend: `task ui:install:bypass` (or `PNPM_CONFIG_MINIMUM_RELEASE_AGE=0 pnpm --prefix src/agymissioncontrol/ui/frontend install` / `--config.minimumReleaseAge=0`)
+2. **Targeted per-package exemption (recommended for an urgent CVE patch in CI):**
+   - Python: Add `<package-name> = false` under `[tool.uv.exclude-newer-package]` in `pyproject.toml` (or run `uv lock --upgrade-package <package-name> --exclude-newer-package <package-name>=false`).
+   - Frontend: Add `<package-name>` to `minimumReleaseAgeExclude` in `src/agymissioncontrol/ui/frontend/pnpm-workspace.yaml`.
+   - Dependabot: Add the package name to `cooldown.exclude` in `.github/dependabot.yml` if needed for scheduled updates.
 
 ### Manual GitHub Repository Settings Checklist
 

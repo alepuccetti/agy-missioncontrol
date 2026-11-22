@@ -42,3 +42,10 @@ ignore = []
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+
+[tool.uv]
+# 3-day supply-chain cooldown for Python package resolution/installation
+exclude-newer = "3 days"
+# Emergency per-package bypass (e.g., critical CVE patch):
+# [tool.uv.exclude-newer-package]
+# package-name = false
