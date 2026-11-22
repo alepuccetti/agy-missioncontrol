@@ -1,0 +1,346 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="cockpit-endpoints" content="/api/quota/status,/api/quota/history,/api/sessions,/api/locks" />
+    <title>Antigravity Mission Control — Quota Cockpit</title>
+    <script type="module" crossorigin src="./assets/index-CgUyb6Vx.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-C-EAzGfG.css">
+  </head>
+  <body>
+    <div class="cockpit-shell" x-data="quotaCockpit" x-cloak>
+      <header class="top-bar">
+        <div class="brand-group">
+          <div class="brand-mark" aria-hidden="true">
+            <i data-lucide="activity" class="icon"></i>
+          </div>
+          <div>
+            <h1 class="brand-title">Mission Control Cockpit</h1>
+            <p class="brand-subtitle">Multi-Session Quota Governor &amp; Shared Pool Registry</p>
+          </div>
+        </div>
+
+        <div class="toolbar-actions">
+          <span class="timestamp-pill" aria-live="polite">
+            Last sync: <strong x-text="lastFetchedAt"></strong>
+          </span>
+
+          <button
+            type="button"
+            class="btn"
+            :class="autoRefresh ? 'btn-toggle-on' : ''"
+            @click="toggleAutoRefresh()"
+            :aria-pressed="autoRefresh"
+          >
+            <i data-lucide="radio" class="icon"></i>
+            <span x-text="autoRefresh ? 'Auto-Refresh (15s): ON' : 'Auto-Refresh (15s): OFF'"></span>
+          </button>
+
+          <button
+            type="button"
+            class="btn btn-primary"
+            @click="refreshAll()"
+            :disabled="isRefreshing"
+          >
+            <i data-lucide="refresh-cw" class="icon" :class="isRefreshing ? 'spinning' : ''"></i>
+            <span>Refresh Now</span>
+          </button>
+
+          <button
+            type="button"
+            class="btn btn-wake"
+            @click="wakeAll()"
+            :disabled="sleepingGateCount === 0 || busyKey === 'wake-all'"
+          >
+            <i data-lucide="play" class="icon"></i>
+            <span>Wake All</span>
+          </button>
+
+          <button
+            type="button"
+            class="btn btn-danger"
+            @click="stopAll()"
+            :disabled="sessions.length === 0 || busyKey === 'stop-all'"
+          >
+            <i data-lucide="square" class="icon"></i>
+            <span>Stop All</span>
+          </button>
+        </div>
+      </header>
+
+      <div class="banner-alert" role="alert" x-show="errorMessage.length > 0">
+        <span>
+          <i data-lucide="alert-triangle" class="icon"></i>
+          <strong x-text="errorMessage"></strong>
+        </span>
+        <button type="button" class="btn" @click="errorMessage = ''">Dismiss</button>
+      </div>
+
+      <section class="kpi-strip" aria-label="Gate &amp; Quota Summary">
+        <article class="kpi-card">
+          <span class="kpi-label"><i data-lucide="activity" class="icon text-active"></i> Active Gates</span>
+          <span class="kpi-value text-active" x-text="activeGateCount"></span>
+        </article>
+        <article class="kpi-card">
+          <span class="kpi-label"><i data-lucide="pause-circle" class="icon text-sleeping"></i> Sleeping Gates</span>
+          <span class="kpi-value text-sleeping" x-text="sleepingGateCount"></span>
+        </article>
+        <article class="kpi-card">
+          <span class="kpi-label"><i data-lucide="clock" class="icon text-info"></i> Lowest 5h Pool</span>
+          <span class="kpi-value text-info" x-text="lowestRollingPct"></span>
+        </article>
+        <article class="kpi-card">
+          <span class="kpi-label"><i data-lucide="trending-down" class="icon"></i> Lowest Weekly Pool</span>
+          <span class="kpi-value" x-text="lowestWeeklyPct"></span>
+        </article>
+        <article class="kpi-card">
+          <span class="kpi-label"><i data-lucide="lock" class="icon text-locked"></i> Active Shared Locks</span>
+          <span class="kpi-value text-locked" x-text="locks.length"></span>
+        </article>
+        <article class="kpi-card">
+          <span class="kpi-label"><i data-lucide="dollar-sign" class="icon"></i> Total Gate Burn</span>
+          <span class="kpi-value" x-text="totalCreditBurn"></span>
+        </article>
+      </section>
+
+      <main class="stack-list">
+        <section aria-labelledby="pools-heading">
+          <div class="section-header">
+            <h2 id="pools-heading" class="section-title">
+              <i data-lucide="layers" class="icon text-info"></i>
+              <span>Model Pool Quotas</span>
+            </h2>
+          </div>
+
+          <template x-if="pools.length === 0">
+            <div class="empty-state">
+              No model pool snapshots recorded yet. Run <code>agymissioncontrol status</code> or <code>agymissioncontrol gate</code> to populate telemetry.
+            </div>
+          </template>
+
+          <div class="pools-layout" x-show="pools.length > 0">
+            <template x-for="pool in pools" :key="pool.model_family">
+              <article class="card" :class="pool.locked ? 'card-locked' : ''">
+                <div class="card-head">
+                  <h3 class="card-title" x-text="pool.model_family"></h3>
+                  <span
+                    class="badge"
+                    :class="pool.locked ? 'badge-locked' : 'badge-active'"
+                    x-text="pool.locked ? 'LOCKED' : 'HEALTHY'"
+                  ></span>
+                </div>
+
+                <div class="meter-block">
+                  <div class="meter-meta">
+                    <span class="meter-label">5h Rolling</span>
+                    <span class="meter-value">
+                      <span x-text="formatPct(pool.rolling_pct)"></span>
+                      <span class="meta-path" x-show="pool.rolling_reset_at" x-text="' (' + countdownFromIso(pool.rolling_reset_at) + ')'"></span>
+                    </span>
+                  </div>
+                  <div class="meter-track">
+                    <div
+                      class="meter-fill"
+                      :class="meterFillClass(pool.rolling_pct, pool.locked)"
+                      :style="`inline-size: ${Math.max(0, Math.min(100, pool.rolling_pct ?? 0))}%`"
+                    ></div>
+                  </div>
+                </div>
+
+                <div class="meter-block">
+                  <div class="meter-meta">
+                    <span class="meter-label">Weekly Allowance</span>
+                    <span class="meter-value">
+                      <span x-text="formatPct(pool.weekly_pct)"></span>
+                      <span class="meta-path" x-show="pool.weekly_reset_at" x-text="' (' + countdownFromIso(pool.weekly_reset_at) + ')'"></span>
+                    </span>
+                  </div>
+                  <div class="meter-track">
+                    <div
+                      class="meter-fill"
+                      :class="meterFillClass(pool.weekly_pct, pool.locked)"
+                      :style="`inline-size: ${Math.max(0, Math.min(100, pool.weekly_pct ?? 0))}%`"
+                    ></div>
+                  </div>
+                </div>
+              </article>
+            </template>
+          </div>
+        </section>
+
+        <section class="chart-card" aria-labelledby="trend-heading">
+          <div class="section-header">
+            <h2 id="trend-heading" class="section-title">
+              <i data-lucide="trending-down" class="icon text-info"></i>
+              <span>Historical Quota Trend</span>
+            </h2>
+            <div class="chart-controls">
+              <label for="pool-filter" class="meter-label">Pool:</label>
+              <select id="pool-filter" class="select-input" x-model="selectedPoolFilter">
+                <option value="ALL">All Model Pools</option>
+                <template x-for="family in availableFamilies" :key="family">
+                  <option :value="family" x-text="family"></option>
+                </template>
+              </select>
+            </div>
+          </div>
+
+          <template x-if="chartSeries.length === 0">
+            <div class="empty-state">
+              No historical quota snapshots available for trend plotting yet.
+            </div>
+          </template>
+
+          <div x-show="chartSeries.length > 0">
+            <svg class="trend-chart" viewBox="0 0 800 200" role="img" aria-label="Historical quota remaining percentage chart">
+              <g stroke="#2d3139" stroke-width="1">
+                <line x1="44" y1="14" x2="780" y2="14" />
+                <line x1="44" y1="56" x2="780" y2="56" />
+                <line x1="44" y1="98" x2="780" y2="98" />
+                <line x1="44" y1="140" x2="780" y2="140" />
+                <line x1="44" y1="182" x2="780" y2="182" />
+              </g>
+              <g fill="#64748b" font-size="10" font-family="monospace">
+                <text x="6" y="18">100%</text>
+                <text x="12" y="60">75%</text>
+                <text x="12" y="102">50%</text>
+                <text x="12" y="144">25%</text>
+                <text x="18" y="186">0%</text>
+              </g>
+              <g x-html="chartSvgMarkup"></g>
+            </svg>
+
+            <div class="chart-legend">
+              <template x-for="series in chartSeries" :key="'legend-' + series.key">
+                <span class="legend-item">
+                  <span
+                    class="legend-swatch"
+                    :style="`background-color: ${series.color}; opacity: ${series.dashed ? 0.65 : 1}`"
+                  ></span>
+                  <span x-text="`${series.modelFamily} · ${series.limitType}`"></span>
+                </span>
+              </template>
+            </div>
+          </div>
+        </section>
+
+        <div class="split-grid">
+          <section aria-labelledby="sessions-heading">
+            <div class="section-header">
+              <h2 id="sessions-heading" class="section-title">
+                <i data-lucide="cpu" class="icon text-active"></i>
+                <span>Active &amp; Sleeping Gates</span>
+              </h2>
+              <span class="badge badge-indigo" x-text="`${sessions.length} registered`"></span>
+            </div>
+
+            <template x-if="sessions.length === 0">
+              <div class="empty-state">
+                No active or sleeping gate processes registered in <code>registry.db</code>.
+              </div>
+            </template>
+
+            <div class="sessions-grid" x-show="sessions.length > 0">
+              <template x-for="session in sessions" :key="session.pid">
+                <article
+                  class="card"
+                  :class="session.state === 'SLEEPING' ? 'card-sleeping' : 'card-active'"
+                >
+                  <div class="card-head">
+                    <div>
+                      <h3 class="card-title" x-text="session.project_name"></h3>
+                      <div class="meta-path" x-text="session.project_dir"></div>
+                    </div>
+                    <span
+                      class="badge"
+                      :class="session.state === 'SLEEPING' ? 'badge-sleeping' : 'badge-active'"
+                      x-text="session.state"
+                    ></span>
+                  </div>
+
+                  <div class="meta-row">
+                    <span class="badge badge-indigo" x-show="session.label" x-text="session.label"></span>
+                    <span class="badge badge-info" x-text="`${session.model} · ${session.quota_group}`"></span>
+                  </div>
+
+                  <div class="meta-row">
+                    <span>PID <strong x-text="session.pid"></strong></span>
+                    <span>Wake: <strong x-text="sessionRemainingLabel(session)"></strong></span>
+                    <span>Burn: <strong x-text="`$${(session.credit_burn_usd || 0).toFixed(2)}`"></strong></span>
+                  </div>
+
+                  <div class="card-actions">
+                    <button
+                      type="button"
+                      class="btn btn-wake"
+                      x-show="session.state === 'SLEEPING'"
+                      @click="wakeSession(session.pid)"
+                      :disabled="busyKey === `wake-${session.pid}`"
+                    >
+                      <i data-lucide="play" class="icon"></i>
+                      <span>Wake Early</span>
+                    </button>
+                    <button
+                      type="button"
+                      class="btn btn-danger"
+                      @click="stopSession(session.pid)"
+                      :disabled="busyKey === `stop-${session.pid}`"
+                    >
+                      <i data-lucide="square" class="icon"></i>
+                      <span>Stop Gate</span>
+                    </button>
+                  </div>
+                </article>
+              </template>
+            </div>
+          </section>
+
+          <section aria-labelledby="locks-heading">
+            <div class="section-header">
+              <h2 id="locks-heading" class="section-title">
+                <i data-lucide="shield-alert" class="icon text-locked"></i>
+                <span>Active Shared Locks</span>
+              </h2>
+              <span class="badge badge-locked" x-show="locks.length > 0" x-text="`${locks.length} active`"></span>
+            </div>
+
+            <template x-if="locks.length === 0">
+              <div class="empty-state">
+                <i data-lucide="check-circle-2" class="icon text-active"></i>
+                All shared model pools unlocked.
+              </div>
+            </template>
+
+            <div class="stack-list" x-show="locks.length > 0">
+              <template x-for="lock in locks" :key="lock.model">
+                <article class="card card-locked">
+                  <div class="card-head">
+                    <h3 class="card-title" x-text="lock.model"></h3>
+                    <span class="badge badge-locked" x-text="countdownFromIso(lock.locked_until)"></span>
+                  </div>
+                  <div class="meta-row">
+                    <span>Owner PID: <strong x-text="lock.locked_by_pid ?? 'n/a'"></strong></span>
+                    <span x-text="lock.reason || 'Shared exhaustion lockout'"></span>
+                  </div>
+                  <div class="card-actions">
+                    <button
+                      type="button"
+                      class="btn btn-danger"
+                      @click="clearLock(lock.model)"
+                      :disabled="busyKey === `lock-${lock.model}`"
+                    >
+                      <i data-lucide="unlock" class="icon"></i>
+                      <span>Clear Lock</span>
+                    </button>
+                  </div>
+                </article>
+              </template>
+            </div>
+          </section>
+        </div>
+      </main>
+    </div>
+
+  </body>
+</html>

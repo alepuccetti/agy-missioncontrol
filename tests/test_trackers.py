@@ -14,29 +14,10 @@ from agymissioncontrol.manifest.tracker import (
     GitHubTracker,
     GitLabTracker,
     MockTracker,
-    RawIssue,
     TrackerError,
     extract_issue_dependencies,
 )
-
-
-def test_raw_issue_model_fields() -> None:
-    issue = RawIssue(
-        number=16,
-        title="Tracker adapters",
-        body="Blocked by #11",
-        labels=["core"],
-        milestone="v0.2.0",
-        parent_issue_number=3,
-        blocked_by_numbers=[11],
-    )
-    assert issue.number == 16
-    assert issue.title == "Tracker adapters"
-    assert issue.body == "Blocked by #11"
-    assert issue.labels == ["core"]
-    assert issue.milestone == "v0.2.0"
-    assert issue.parent_issue_number == 3
-    assert issue.blocked_by_numbers == [11]
+from agymissioncontrol.manifest.tracker.base import run_cli_json
 
 
 def test_extract_issue_dependencies_patterns_and_tasklists() -> None:
@@ -232,3 +213,32 @@ def test_mock_tracker_default_fixtures_available_offline() -> None:
     by_num = {issue.number: issue for issue in issues}
     assert by_num[102].blocked_by_numbers == [101]
     assert by_num[103].blocked_by_numbers == [101, 102]
+
+
+def test_run_cli_json_handles_timeout_and_oserror() -> None:
+    def _timeout_runner(*_args: Any, **_kwargs: Any) -> subprocess.CompletedProcess[str]:
+        raise subprocess.TimeoutExpired(cmd=["gh"], timeout=30)
+
+    def _oserror_runner(*_args: Any, **_kwargs: Any) -> subprocess.CompletedProcess[str]:
+        raise OSError("permission denied")
+
+    with pytest.raises(TrackerError, match="timed out"):
+        run_cli_json(["gh", "issue", "list"], cli_name="gh", runner=_timeout_runner)
+
+    with pytest.raises(TrackerError, match="Failed to invoke `glab`"):
+        run_cli_json(["glab", "issue", "list"], cli_name="glab", runner=_oserror_runner)
+
+
+def test_mock_tracker_rejects_missing_and_invalid_fixtures(tmp_path: Path) -> None:
+    with pytest.raises(TrackerError, match="does not exist"):
+        MockTracker(tmp_path / "missing.json").fetch_issues()
+
+    bad_json = tmp_path / "bad.json"
+    bad_json.write_text("{not json", encoding="utf-8")
+    with pytest.raises(TrackerError, match="Invalid mock fixture"):
+        MockTracker(bad_json).fetch_issues()
+
+    bad_shape = tmp_path / "bad_shape.yaml"
+    bad_shape.write_text('"just-a-string"\n', encoding="utf-8")
+    with pytest.raises(TrackerError, match="must be a list"):
+        MockTracker(bad_shape).fetch_issues()

@@ -13,6 +13,10 @@ build/
 venv/
 env/
 
+# Frontend dependencies (compiled static bundle in ui/static/ remains tracked)
+node_modules/
+src/agymissioncontrol/ui/frontend/node_modules/
+
 # Testing & Coverage
 .pytest_cache/
 .coverage

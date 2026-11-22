@@ -183,3 +183,35 @@ def test_incremental_merge_raises_on_cycle() -> None:
     ]
     with pytest.raises(CyclicDependencyError, match="Cycle detected"):
         merge_manifests(existing, incoming)
+
+
+def test_merge_manifests_updates_todo_constraints_and_matches_by_issue_number() -> None:
+    existing = [
+        TaskItem(
+            task_id="CUSTOM-103",
+            issue_number=103,
+            title="Old Title",
+            status=TaskStatus.TODO,
+            constraints="Old constraint",
+            scope="old.py",
+            verification="pytest",
+        )
+    ]
+    incoming = [
+        TaskItem(
+            task_id="TASK-103",
+            issue_number=103,
+            title="Updated Title",
+            status=TaskStatus.TODO,
+            constraints="Fresh constraint A; Fresh constraint B",
+            scope="new.py",
+            verification="pytest tests/test_manifest.py",
+        )
+    ]
+
+    merged = merge_manifests(existing, incoming)
+    assert len(merged) == 1
+    item = merged[0]
+    assert item.task_id == "CUSTOM-103"
+    assert item.title == "Updated Title"
+    assert item.constraints == "Fresh constraint A; Fresh constraint B"

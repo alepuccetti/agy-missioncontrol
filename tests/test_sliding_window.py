@@ -46,6 +46,20 @@ def test_calculate_sleep_duration_boundaries() -> None:
     naive_reset = datetime(2026, 11, 14, 12, 2, 5)
     assert calculate_sleep_duration(naive_reset, safety_buffer_seconds=15, now_utc=naive_now) == 140
 
+    # Sub-second positive remainders ceil upward so sleep never wakes before reset (QW-01)
+    assert (
+        calculate_sleep_duration(
+            now + timedelta(milliseconds=250), safety_buffer_seconds=0, now_utc=now
+        )
+        == 1
+    )
+    assert (
+        calculate_sleep_duration(
+            now + timedelta(milliseconds=1250), safety_buffer_seconds=10, now_utc=now
+        )
+        == 12
+    )
+
 
 def test_estimate_directional_allowance_pct() -> None:
     assert estimate_directional_allowance_pct(250_000, "claude-3-7-sonnet") == 25.0
@@ -193,3 +207,61 @@ def test_token_transactions_overhead_and_credit_spend(
     assert get_credit_spend(proj_dir, since=t_new) == 1.25
     assert get_credit_spend(proj_dir, since=t_new + timedelta(seconds=1)) == 0.0
     assert get_session_token_totals(proj_dir, since=t_new).total_tokens == 200_000
+
+
+def test_get_quota_history_mixed_timestamp_ordering(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("AGY_MC_STATE_DIR", str(tmp_path / "state"))
+    proj_dir = tmp_path / "repo-mixed-ts"
+    proj_dir.mkdir()
+    init_ledger(proj_dir)
+    db_path = proj_dir / ".agymissioncontrol" / "missioncontrol.db"
+
+    conn = sqlite3.connect(str(db_path))
+    try:
+        # Insert out of order across Z, +02:00 offset, and space-delimited SQLite datetime:
+        # 10:00:00Z < 10:30:00 < 13:00:00+02:00 (= 11:00:00Z) < 12:00:00Z
+        reset_at = "2026-11-15T18:00:00Z"
+        rows = [
+            ("2026-11-15T12:00:00Z", "Gemini Models", "five_hour", 40.0, reset_at, "t4"),
+            ("2026-11-15T13:00:00+02:00", "Gemini Models", "five_hour", 60.0, reset_at, "t3"),
+            ("2026-11-15 10:30:00", "Gemini Models", "five_hour", 80.0, reset_at, "t2"),
+            ("2026-11-15T10:00:00Z", "Gemini Models", "five_hour", 90.0, reset_at, "t1"),
+        ]
+        conn.executemany(
+            """
+            INSERT INTO quota_snapshots (
+                timestamp, model_family, limit_type, remaining_pct, reset_at, raw_line
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            rows,
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    by_family = get_quota_history(proj_dir, model_family="Gemini Models", limit=10)
+    assert [entry["raw_line"] for entry in by_family] == ["t1", "t2", "t3", "t4"]
+    all_history = get_quota_history(proj_dir, limit=10)
+    assert [entry["raw_line"] for entry in all_history] == ["t1", "t2", "t3", "t4"]
+
+
+def test_explicit_zero_cost_preserved_when_non_credit_funded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("AGY_MC_STATE_DIR", str(tmp_path / "state"))
+    proj_dir = tmp_path / "repo-zero-cost"
+    proj_dir.mkdir()
+    record_token_transaction(
+        proj_dir,
+        task_id="E05-T04-ZERO",
+        model="claude-3-7-sonnet",
+        usage=UsageTelemetry(
+            prompt_tokens=100_000,
+            work_tokens=100_000,
+            estimated_cost_usd=0.0,
+            is_credit_funded=False,
+        ),
+    )
+    assert get_session_token_totals(proj_dir).estimated_cost_usd == 0.0

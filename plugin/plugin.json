@@ -1,4 +1,5 @@
 {
   "name": "agymissioncontrol",
+  "displayName": "Mission Control",
   "description": "Authoritative quota governor, zero-token sleep controller, and live quota cockpit for Google Antigravity"
 }

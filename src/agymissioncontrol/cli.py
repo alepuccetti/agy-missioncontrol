@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import atexit
 import json
 import os
+from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 import typer
 from rich.console import Console
@@ -17,6 +19,7 @@ import agymissioncontrol
 from agymissioncontrol.config import (
     CreditPolicy,
     CreditTrigger,
+    atomic_write_text,
     ensure_gitignore_guard,
     load_config,
 )
@@ -53,6 +56,21 @@ from agymissioncontrol.quota import (
     render_report_rich,
     resolve_quota_group,
     write_quota_report,
+)
+from agymissioncontrol.registry import (
+    SessionState,
+    SessionStatus,
+    list_active_sessions,
+    register_session,
+    stop_target,
+    unregister_session,
+    update_session_state,
+    wake_target,
+)
+from agymissioncontrol.ui import (
+    run_dashboard_server,
+    spawn_detached_dashboard,
+    stop_detached_dashboard,
 )
 from agymissioncontrol.ui.display import build_status_payload, render_status_table
 
@@ -246,6 +264,13 @@ def gate(
             help="Use deterministic mock telemetry instead of invoking external `agy` CLI.",
         ),
     ] = False,
+    label: Annotated[
+        str,
+        typer.Option(
+            "--label",
+            help="Optional Orchestrator task or workstream label.",
+        ),
+    ] = "",
 ) -> None:
     """Enforce pre-flight dual-tier quota and shared lockout gates."""
     cfg = load_config(
@@ -267,22 +292,87 @@ def gate(
     root = cfg.paths.project_root
     provider = _build_provider(root, mock=mock)
 
-    try:
-        decision = evaluate_and_gate(
-            model=cfg.models.default_model,
-            provider=provider,
-            credit_cfg=cfg.governor.credits,
-            rolling_threshold=cfg.governor.threshold_percent,
-            weekly_threshold=cfg.governor.weekly_threshold_percent,
-            safety_buffer_seconds=cfg.governor.safety_buffer_seconds,
-            auto_sleep=cfg.execution.auto_sleep,
-            max_sleep_seconds=cfg.governor.max_sleep_seconds,
-            caller_bypass_5h=bypass_5h_quota,
-            project_dir=root,
+    pid = os.getpid()
+    active_model = cfg.models.default_model
+    quota_group = resolve_quota_group(active_model)
+    gate_started = datetime.now(UTC)
+
+    def _safe_unregister() -> None:
+        try:
+            unregister_session(pid)
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _on_gate_event(event: str, payload: dict[str, Any]) -> None:
+        if event == "SLEEP_ENTERED":
+            wakes_raw = payload.get("wakes_at")
+            wakes_dt = datetime.fromisoformat(str(wakes_raw)) if wakes_raw else None
+            update_session_state(
+                pid,
+                SessionStatus.SLEEPING,
+                wakes_at=wakes_dt,
+                sleep_started_at=datetime.now(UTC),
+                credit_burn_usd=get_credit_spend(root),
+            )
+        elif event == "SLEEP_WOKEN":
+            update_session_state(
+                pid,
+                SessionStatus.ACTIVE,
+                wakes_at=None,
+                sleep_started_at=None,
+                credit_burn_usd=get_credit_spend(root),
+            )
+
+    register_session(
+        SessionState(
+            pid=pid,
+            project_name=root.name,
+            project_dir=str(root),
+            label=label,
+            model=active_model,
+            quota_group=quota_group,
+            state=SessionStatus.ACTIVE,
+            credit_burn_usd=get_credit_spend(root),
         )
+    )
+    atexit.register(_safe_unregister)
+
+    try:
+        while True:
+            effective_max_sleep = cfg.governor.max_sleep_seconds
+            if effective_max_sleep is not None:
+                elapsed = int((datetime.now(UTC) - gate_started).total_seconds())
+                effective_max_sleep = max(0, effective_max_sleep - elapsed)
+
+            decision = evaluate_and_gate(
+                model=active_model,
+                provider=provider,
+                credit_cfg=cfg.governor.credits,
+                rolling_threshold=cfg.governor.threshold_percent,
+                weekly_threshold=cfg.governor.weekly_threshold_percent,
+                safety_buffer_seconds=cfg.governor.safety_buffer_seconds,
+                auto_sleep=cfg.execution.auto_sleep,
+                max_sleep_seconds=effective_max_sleep,
+                caller_bypass_5h=bypass_5h_quota,
+                project_dir=root,
+                on_event=_on_gate_event,
+                max_session_tokens=cfg.governor.max_session_tokens,
+            )
+            if decision.woken_early:
+                update_session_state(
+                    pid,
+                    SessionStatus.ACTIVE,
+                    wakes_at=None,
+                    sleep_started_at=None,
+                    credit_burn_usd=get_credit_spend(root),
+                )
+                continue
+            break
     except (RuntimeError, ValueError) as exc:
         typer.echo(f"Error evaluating quota gate: {exc}", err=True)
         raise typer.Exit(code=1) from exc
+    finally:
+        _safe_unregister()
 
     if decision.exit_code == 0:
         if decision.is_credit_funded:
@@ -463,8 +553,7 @@ def plan(
         typer.echo(rendered_manifest, nl=False)
         return
 
-    target_path.parent.mkdir(parents=True, exist_ok=True)
-    target_path.write_text(rendered_manifest, encoding="utf-8")
+    atomic_write_text(target_path, rendered_manifest, encoding="utf-8")
     typer.echo(f"Wrote {len(ordered_tasks)} task(s) to {target_path}")
 
 
@@ -537,7 +626,7 @@ def report(
         written_path = write_quota_report(
             quota_report,
             cfg.paths.reports_dir,
-            fmt=fmt.value,  # type: ignore[arg-type]
+            fmt=fmt.value,
         )
         typer.echo(f"Wrote quota report to {written_path}", err=(fmt == ReportFormat.JSON))
 
@@ -620,6 +709,154 @@ def unlock(
     group = resolve_quota_group(model)
     clear_shared_model_lock(model)
     typer.echo(f"Cleared shared lock for {group} ({model}).")
+
+
+@app.command()
+def ps(
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", help="Emit registered gate sessions as JSON."),
+    ] = False,
+) -> None:
+    """List active and sleeping `agymissioncontrol gate` sessions in `registry.db`."""
+    sessions = list_active_sessions()
+    if json_output:
+        typer.echo(json.dumps([session.model_dump(mode="json") for session in sessions], indent=2))
+        return
+
+    if not sessions:
+        typer.echo("No active or sleeping gate sessions.")
+        return
+
+    table = Table(
+        title="agyMissionControl — Active & Sleeping Gates",
+        show_header=True,
+        header_style="bold cyan",
+    )
+    table.add_column("PID", justify="right", style="bold", no_wrap=True)
+    table.add_column("Project")
+    table.add_column("Label")
+    table.add_column("Model")
+    table.add_column("Pool")
+    table.add_column("State", no_wrap=True)
+    table.add_column("Remaining Sleep", justify="right", no_wrap=True)
+    table.add_column("Credit Burn", justify="right", no_wrap=True)
+
+    for session in sessions:
+        remaining = (
+            f"{session.remaining_sleep_seconds}s"
+            if session.remaining_sleep_seconds is not None
+            else "-"
+        )
+        table.add_row(
+            str(session.pid),
+            session.project_name,
+            session.label or "-",
+            session.model,
+            session.quota_group,
+            str(session.state),
+            remaining,
+            f"${session.credit_burn_usd:.2f}",
+        )
+    console = Console()
+    if console.width < 140:
+        console = Console(width=140)
+    console.print(table)
+
+
+@app.command()
+def wake(
+    target: Annotated[
+        str | None,
+        typer.Argument(help="Target PID, project name, label, or model/pool name."),
+    ] = None,
+    all_sessions: Annotated[
+        bool,
+        typer.Option("--all", help="Wake all sleeping gate sessions via SIGUSR1."),
+    ] = False,
+) -> None:
+    """Send `SIGUSR1` to wake matching sleeping gate session(s) for immediate re-check."""
+    if not all_sessions and not target:
+        typer.echo("Error: specify a TARGET argument or pass --all.", err=True)
+        raise typer.Exit(code=1)
+
+    woken_pids = wake_target(target=target, match_all=all_sessions)
+    if not woken_pids:
+        typer.echo("No matching sleeping gate sessions found.")
+        raise typer.Exit(code=1)
+
+    pid_list = ", ".join(str(pid) for pid in woken_pids)
+    typer.echo(f"Woke sleeping gate session(s): {pid_list}")
+
+
+@app.command()
+def stop(
+    target: Annotated[
+        str | None,
+        typer.Argument(help="Target PID, project name, label, or model/pool name."),
+    ] = None,
+    all_sessions: Annotated[
+        bool,
+        typer.Option("--all", help="Stop all active/sleeping gate sessions via SIGTERM."),
+    ] = False,
+) -> None:
+    """Send `SIGTERM` for graceful teardown of matching gate session(s)."""
+    if not all_sessions and not target:
+        typer.echo("Error: specify a TARGET argument or pass --all.", err=True)
+        raise typer.Exit(code=1)
+
+    stopped_pids = stop_target(target=target, match_all=all_sessions)
+    if not stopped_pids:
+        typer.echo("No matching gate sessions found.")
+        raise typer.Exit(code=1)
+
+    pid_list = ", ".join(str(pid) for pid in stopped_pids)
+    typer.echo(f"Sent SIGTERM to gate session(s): {pid_list}")
+
+
+@app.command()
+def dashboard(
+    port: Annotated[
+        int,
+        typer.Option("--port", min=1, max=65535, help="Localhost port for cockpit HTTP server."),
+    ] = 8484,
+    no_browser: Annotated[
+        bool,
+        typer.Option("--no-browser", help="Do not open the web browser automatically."),
+    ] = False,
+    detach: Annotated[
+        bool,
+        typer.Option("--detach", "-d", help="Run the dashboard server in the background."),
+    ] = False,
+    stop_server: Annotated[
+        bool,
+        typer.Option("--stop", help="Stop a running detached dashboard server via SIGTERM."),
+    ] = False,
+) -> None:
+    """Serve the live Quota Cockpit web dashboard locally on `127.0.0.1`."""
+    if stop_server:
+        stopped, _pid, message = stop_detached_dashboard()
+        typer.echo(message)
+        if not stopped and "invalid" in message.lower():
+            raise typer.Exit(code=1)
+        return
+
+    open_browser = not no_browser
+    if detach:
+        try:
+            pid = spawn_detached_dashboard(port=port, open_browser=open_browser)
+        except (RuntimeError, OSError) as exc:
+            typer.echo(f"Error starting detached dashboard server on port {port}: {exc}", err=True)
+            raise typer.Exit(code=1) from exc
+        typer.echo(f"Quota Cockpit running at http://localhost:{port} (PID {pid})")
+        return
+
+    typer.echo(f"Serving Quota Cockpit at http://localhost:{port} (Press Ctrl+C to stop)")
+    try:
+        run_dashboard_server(port=port, open_browser=open_browser)
+    except OSError as exc:
+        typer.echo(f"Error starting dashboard server on port {port}: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
 
 
 if __name__ == "__main__":
