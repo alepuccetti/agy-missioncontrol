@@ -254,6 +254,20 @@ def build_history_payload(
     return {"points": points}
 
 
+def _build_static_asset_map(static_root: Path) -> dict[str, Path]:
+    """Index non-symlink static files under ``static_root`` by normalized POSIX relative path."""
+    assets: dict[str, Path] = {}
+    if not static_root.is_dir():
+        return assets
+    for item in static_root.rglob("*"):
+        if item.is_symlink() or not item.is_file():
+            continue
+        resolved = item.resolve()
+        if resolved.is_relative_to(static_root):
+            assets[item.relative_to(static_root).as_posix()] = resolved
+    return assets
+
+
 class DashboardHTTPServer(ThreadingHTTPServer):
     """Multi-threaded stdlib HTTP server bound exclusively to loopback."""
 
@@ -301,25 +315,24 @@ class DashboardHandler(BaseHTTPRequestHandler):
             decoded = "index.html"
 
         posix_parts = PurePosixPath(decoded).parts
-        if any(part == ".." for part in posix_parts):
+        if "\\" in decoded or "\x00" in decoded or any(part == ".." for part in posix_parts):
             self._send_json(HTTPStatus.FORBIDDEN, {"error": "Path traversal forbidden"})
             return
 
-        candidate = (static_root / decoded).resolve()
-        if not candidate.is_relative_to(static_root):
-            self._send_json(HTTPStatus.FORBIDDEN, {"error": "Path traversal forbidden"})
-            return
-
-        if not candidate.is_file():
+        # Look up the requested asset against an explicit allowlist of real files inside
+        # static_root so user input never flows into Path resolution or MIME guessing.
+        normalized = PurePosixPath(decoded).as_posix()
+        asset_path = _build_static_asset_map(static_root).get(normalized)
+        if asset_path is None:
             self._send_json(HTTPStatus.NOT_FOUND, {"error": "Static asset not found"})
             return
 
-        suffix = candidate.suffix.lower()
+        suffix = asset_path.suffix.lower()
         content_type = _MIME_OVERRIDES.get(suffix)
         if content_type is None:
-            guessed, _ = mimetypes.guess_type(str(candidate))
+            guessed, _ = mimetypes.guess_type(str(asset_path))
             content_type = guessed or "application/octet-stream"
-        self._send_bytes(HTTPStatus.OK, candidate.read_bytes(), content_type)
+        self._send_bytes(HTTPStatus.OK, asset_path.read_bytes(), content_type)
 
     def _drain_request_body(self) -> None:
         content_length = int(self.headers.get("Content-Length", "0") or 0)

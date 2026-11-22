@@ -166,11 +166,18 @@ def test_release_workflow_uses_pinned_runners_and_required_steps() -> None:
     # PyYAML parses unquoted `on` as boolean True per YAML 1.1 rules.
     trigger = workflow[True] if True in workflow else workflow["on"]
     assert trigger["push"]["tags"] == ["v*.*.*"]
-    assert workflow["permissions"]["contents"] == "write"
+    assert workflow["permissions"]["contents"] == "read"
 
     jobs = workflow["jobs"]
     build_job = jobs["build"]
     publish_job = jobs["publish"]
+
+    assert build_job["permissions"]["contents"] == "read"
+    assert publish_job["permissions"] == {
+        "contents": "write",
+        "id-token": "write",
+        "attestations": "write",
+    }
 
     assert build_job["runs-on"] == "${{ matrix.os }}"
     matrix_entries = build_job["strategy"]["matrix"]["include"]

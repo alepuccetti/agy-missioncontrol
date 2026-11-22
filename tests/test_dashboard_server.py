@@ -107,8 +107,40 @@ def test_dashboard_http_server_static_assets_and_traversal_guard(
         assert b"/api/quota/status" in asset_body
 
         # Path traversal must be rejected before touching files outside static dir
-        trav_status, _, _ = _request(host, port, "GET", "/assets/../../../../etc/passwd")
-        assert trav_status == 403
+        for bad_path in (
+            "/assets/../../../../etc/passwd",
+            "/%2e%2e/%2e%2e/etc/passwd",
+            "/assets/..%5c..%5cetc/passwd",
+        ):
+            trav_status, _, _ = _request(host, port, "GET", bad_path)
+            assert trav_status == 403
+
+        missing_status, _, _ = _request(host, port, "GET", "/nonexistent-asset.js")
+        assert missing_status == 404
+
+
+def test_dashboard_static_server_ignores_symlinks_outside_root(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("AGY_MC_STATE_DIR", str(tmp_path / "state"))
+    outside_secret = tmp_path / "secret.txt"
+    outside_secret.write_text("sensitive", encoding="utf-8")
+
+    static_dir = tmp_path / "static"
+    static_dir.mkdir()
+    (static_dir / "index.html").write_text("<html>ok</html>", encoding="utf-8")
+    (static_dir / "leak.txt").symlink_to(outside_secret)
+
+    monkeypatch.setattr("agymissioncontrol.ui.server.get_static_dir", lambda: static_dir)
+
+    with _running_server() as (host, port):
+        ok_status, _, ok_body = _request(host, port, "GET", "/")
+        assert ok_status == 200
+        assert ok_body == b"<html>ok</html>"
+
+        leak_status, _, _ = _request(host, port, "GET", "/leak.txt")
+        assert leak_status == 404
 
 
 def test_dashboard_rest_api_endpoints_and_controls(
