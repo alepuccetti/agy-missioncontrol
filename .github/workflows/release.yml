@@ -24,26 +24,26 @@ jobs:
             artifact_name: agymissioncontrol-linux-x86_64
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Set up uv Toolchain
-        uses: astral-sh/setup-uv@v10.4.0
+        uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
         with:
           enable-cache: true
           python-version: "3.15"
 
       - name: Install pnpm Package Manager
-        uses: pnpm/action-setup@v6
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6
         with:
           version: 12
 
       - name: Set up Node.js LTS
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: 26  # Node.js 26 Active LTS
 
       - name: Set up Go-Task Runner
-        uses: arduino/setup-task@v3.0.0
+        uses: arduino/setup-task@c0bc642852239c2689f73f4ea6459c29405f3c52 # v3.0.0
         with:
           version: 3.x
           repo-token: ${{ secrets.GITHUB_TOKEN }}
@@ -70,7 +70,7 @@ jobs:
         run: mv dist/agymissioncontrol dist/${{ matrix.artifact_name }}
 
       - name: Upload Binary Artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: ${{ matrix.artifact_name }}
           path: dist/${{ matrix.artifact_name }}
@@ -85,10 +85,10 @@ jobs:
       attestations: write
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Download Built Artifacts
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           path: release_assets
           merge-multiple: true
@@ -98,7 +98,7 @@ jobs:
           python3 scripts/package_plugin.py --version "${{ github.ref_name }}" --output release_assets
 
       - name: Attest Build Provenance
-        uses: actions/attest@v4
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
         with:
           subject-path: 'release_assets/agymissioncontrol-*'
 
