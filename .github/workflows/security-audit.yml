@@ -50,3 +50,54 @@ jobs:
 
       - name: Audit Frontend Dependencies
         run: pnpm --prefix src/agymissioncontrol/ui/frontend audit --audit-level=moderate
+
+  secrets-scan:
+    name: Secret Scan (Gitleaks)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+
+      - name: Run Gitleaks
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_ENABLE_COMMENTS: false
+
+  signed-commits:
+    name: Verify Commit Signatures
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+
+      - name: Check GPG signature headers on commits
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+          CURRENT_SHA: ${{ github.sha }}
+        run: |
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            RANGE="${PR_BASE_SHA}..${PR_HEAD_SHA}"
+          elif [ -n "$PUSH_BEFORE_SHA" ] && [ "$PUSH_BEFORE_SHA" != "0000000000000000000000000000000000000000" ]; then
+            RANGE="${PUSH_BEFORE_SHA}..${CURRENT_SHA}"
+          else
+            RANGE="-n 1 ${CURRENT_SHA}"
+          fi
+
+          for sha in $(git rev-list $RANGE); do
+            short_sha="$(git rev-parse --short "$sha")"
+            subject="$(git log -1 --format="%s" "$sha")"
+            if ! git cat-file commit "$sha" | grep -q '^gpgsig '; then
+              echo "✗ Unsigned commit detected: $short_sha ($subject)" >&2
+              exit 1
+            fi
+            echo "✓ Signed commit: $short_sha ($subject)"
+          done
