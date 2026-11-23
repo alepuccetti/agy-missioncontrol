@@ -53,7 +53,9 @@ def test_manifest_parser_fuzzer_handles_edge_inputs() -> None:
 
 def test_clusterfuzzlite_files_and_workflow_structure() -> None:
     cflite_dir = REPO_ROOT / ".clusterfuzzlite"
-    assert (cflite_dir / "Dockerfile").is_file()
+    dockerfile_text = (cflite_dir / "Dockerfile").read_text(encoding="utf-8")
+    assert "base-builder-python" in dockerfile_text
+    assert "build.sh $SRC/" in dockerfile_text
     assert (cflite_dir / "build.sh").is_file()
 
     project_cfg = yaml.safe_load((cflite_dir / "project.yaml").read_text(encoding="utf-8"))
